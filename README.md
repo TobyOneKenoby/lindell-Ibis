@@ -1,9 +1,11 @@
 # Heron EQ
 
-A four-band parallel equaliser plug-in (VST3 / AU / Standalone) inspired by the
-behaviour of classic discrete Class-A program equalisers with musically stepped
-frequencies. It is an independent design: it uses no code, artwork or trademarks
-from any hardware manufacturer.
+A dual-channel, four-band parallel equaliser plug-in (VST3 / AU / Standalone) modelled
+on the Crane Song IBIS discrete Class-A equaliser, with a photographic bitmap front panel.
+
+> **Personal use only.** The GUI is built from a photo of the Crane Song IBIS front
+> panel, including its logo. Crane Song's trademarks and artwork belong to Crane Song
+> Ltd. Do not distribute builds of this plug-in.
 
 ![Heron EQ](docs/screenshot.png)
 
@@ -31,9 +33,34 @@ from any hardware manufacturer.
 - **Colour**: an additive 2nd/3rd-harmonic generator. It can apply to the full
   programme or to any single band. On a band it follows that band's boost or
   cut, so a **cut removes** harmonic content instead of adding it.
-- 2× oversampling, a host bypass that crossfades with no click, and automation
+- **Two channels, like the hardware.** CH1 processes left and CH2 processes right.
+  They are linked by default, so either half of the panel controls both channels.
+  Right-click an empty part of the panel to unlink them (dual mono) or to copy CH1 to CH2.
+- **CH1 / CH2 IN/OUT switches** and a **POWER** switch, which is the host bypass. The
+  lamp goes out when POWER is off.
+- 2× oversampling, a bypass that crossfades with no click, and automation
   without zipper noise.
-- Resizable vector UI with a live response curve.
+
+## GUI
+
+The panel is 100% bitmap: the photo itself, with no vector drawing.
+`tools/extract_panel.py` takes the reference photo and produces:
+
+- the panel background, with the knob caps removed;
+- each knob's cap, which the plug-in rotates around its centre;
+- a pushed-in image for every push button;
+- a flipped-lever image for each toggle switch;
+- an unlit image of the power lamp.
+
+Each knob's angle range matches the scale printed on the panel. Gain and bandwidth
+use the panel's own (non-linear) markings.
+
+To use a sharper photo, run the script on it and rebuild. The seed coordinates in the
+script are for a 2000×620 photo with the same framing.
+
+```bash
+python3 tools/extract_panel.py path/to/photo.jpg
+```
 
 ## How the DSP works
 
@@ -116,5 +143,4 @@ build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Rel
 ## Ideas for later
 
 - A "Mastering" mode: ±6 dB in 0.5 dB steps, and stepped bandwidth and colour.
-- Dual-mono / mid-side operation with unlinked controls.
 - Per-band insert sends (the hardware has them) via sidechain buses.

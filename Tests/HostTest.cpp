@@ -29,7 +29,7 @@ static void setParam (AudioPluginInstance& p, const String& name, float normalis
 }
 
 // Steady-state sine gain in dB through the plugin.
-static double sineGainDb (AudioPluginInstance& p, double sr, double hz, int block)
+static double sineGainDb (AudioPluginInstance& p, double sr, double hz, int block, int ch = 0)
 {
     p.reset();
     AudioBuffer<float> buf (2, block);
@@ -48,8 +48,8 @@ static double sineGainDb (AudioPluginInstance& p, double sr, double hz, int bloc
             if (n >= measureFrom)
             {
                 const double ph = 2.0 * MathConstants<double>::pi * hz * (double) n / sr;
-                accRe += buf.getSample (0, i) * std::cos (ph);
-                accIm -= buf.getSample (0, i) * std::sin (ph);
+                accRe += buf.getSample (ch, i) * std::cos (ph);
+                accIm -= buf.getSample (ch, i) * std::sin (ph);
                 ++count;
             }
     }
@@ -89,12 +89,28 @@ int main (int argc, char** argv)
     check (std::abs (flat) < 0.1, "flat at default settings (" + String (flat, 3) + " dB)");
 
     // Band 3 default position is A#6 (1864.7 Hz); full boost should be +12 dB.
-    setParam (*plugin, "Band 3 Gain", 1.0f);
+    setParam (*plugin, "CH1 Band 3 Gain", 1.0f);
     const double boost = sineGainDb (*plugin, sr, 1864.655, block);
     check (std::abs (boost - 12.0) < 0.3, "band 3 +12 dB at 1.86 kHz (" + String (boost, 2) + " dB)");
-    setParam (*plugin, "Band 3 Gain", 0.0f);
+    setParam (*plugin, "CH1 Band 3 Gain", 0.0f);
     const double cut = sineGainDb (*plugin, sr, 1864.655, block);
     check (std::abs (cut + 12.0) < 0.3, "band 3 -12 dB at 1.86 kHz (" + String (cut, 2) + " dB)");
+
+    // Linked (default): CH1 controls drive both channels.
+    const double linkedRight = sineGainDb (*plugin, sr, 1864.655, block, 1);
+    check (std::abs (linkedRight + 12.0) < 0.3, "linked: right channel follows CH1 (" + String (linkedRight, 2) + " dB)");
+    // Unlinked: the right channel uses CH2's (flat) settings.
+    setParam (*plugin, "Link", 0.0f);
+    const double unlinkedRight = sineGainDb (*plugin, sr, 1864.655, block, 1);
+    check (std::abs (unlinkedRight) < 0.1, "unlinked: right channel uses CH2 (" + String (unlinkedRight, 3) + " dB)");
+    setParam (*plugin, "CH2 In", 0.0f);
+    setParam (*plugin, "CH2 Band 3 Gain", 1.0f);
+    const double ch2Out = sineGainDb (*plugin, sr, 1864.655, block, 1);
+    check (std::abs (ch2Out) < 0.1, "CH2 IN/OUT switch set to OUT (" + String (ch2Out, 3) + " dB)");
+    setParam (*plugin, "CH2 In", 1.0f);
+    const double ch2In = sineGainDb (*plugin, sr, 1864.655, block, 1);
+    check (std::abs (ch2In - 12.0) < 0.3, "CH2 boost when unlinked (" + String (ch2In, 2) + " dB)");
+    setParam (*plugin, "Link", 1.0f);
 
     // Bypass returns to unity.
     plugin->getBypassParameter()->setValueNotifyingHost (1.0f);
@@ -103,13 +119,13 @@ int main (int argc, char** argv)
     plugin->getBypassParameter()->setValueNotifyingHost (0.0f);
 
     // Busy settings, random noise, odd block sizes, automation mid-stream: output must stay finite.
-    setParam (*plugin, "Band 1 Shelf", 1.0f);
-    setParam (*plugin, "Band 1 Gain", 0.8f);
-    setParam (*plugin, "Band 2 Gain", 0.3f);
-    setParam (*plugin, "Band 4 Gain", 0.85f);
-    setParam (*plugin, "Low Cut", 0.35f);
-    setParam (*plugin, "Colour Source", 1.0f);
-    setParam (*plugin, "Colour", 0.8f);
+    setParam (*plugin, "CH1 Band 1 Shelf", 1.0f);
+    setParam (*plugin, "CH1 Band 1 Gain", 0.8f);
+    setParam (*plugin, "CH1 Band 2 Gain", 0.3f);
+    setParam (*plugin, "CH1 Band 4 Gain", 0.85f);
+    setParam (*plugin, "CH1 Low Cut", 0.35f);
+    setParam (*plugin, "CH1 Colour Source", 1.0f);
+    setParam (*plugin, "CH1 Colour", 0.8f);
     {
         Random rng (7);
         bool finite = true; float peak = 0;
@@ -120,8 +136,8 @@ int main (int argc, char** argv)
             AudioBuffer<float> buf (2, n);
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < n; ++i) buf.setSample (ch, i, rng.nextFloat() * 2.0f - 1.0f);
-            if (it % 25 == 0) setParam (*plugin, "Band 2 Freq", rng.nextFloat());
-            if (it % 30 == 0) setParam (*plugin, "Band 3 Bandwidth", rng.nextFloat());
+            if (it % 25 == 0) setParam (*plugin, "CH1 Band 2 Freq", rng.nextFloat());
+            if (it % 30 == 0) setParam (*plugin, "CH1 Band 3 Bandwidth", rng.nextFloat());
             plugin->processBlock (buf, midi);
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < n; ++i)
@@ -138,10 +154,10 @@ int main (int argc, char** argv)
     {
         MemoryBlock state;
         plugin->getStateInformation (state);
-        const float before = findParam (*plugin, "Band 4 Gain")->getValue();
-        setParam (*plugin, "Band 4 Gain", 0.1f);
+        const float before = findParam (*plugin, "CH1 Band 4 Gain")->getValue();
+        setParam (*plugin, "CH1 Band 4 Gain", 0.1f);
         plugin->setStateInformation (state.getData(), (int) state.getSize());
-        const float after = findParam (*plugin, "Band 4 Gain")->getValue();
+        const float after = findParam (*plugin, "CH1 Band 4 Gain")->getValue();
         check (std::abs (before - after) < 1e-4f, "state save / restore");
     }
 

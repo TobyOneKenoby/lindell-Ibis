@@ -2,67 +2,55 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
+#include "PanelLayout.h"
 
 namespace heron::ui
 {
-    namespace colours
-    {
-        const juce::Colour panel      { 0xff1b1d20 };
-        const juce::Colour panelLight { 0xff26292d };
-        const juce::Colour groove     { 0xff121315 };
-        const juce::Colour text       { 0xffe9e2d2 };
-        const juce::Colour textDim    { 0xff8f8a80 };
-        const juce::Colour copper     { 0xffd2864a };
-        const juce::Colour slate      { 0xff6f8796 };
-        const juce::Colour bone       { 0xffbdb6a6 };
-        const juce::Colour ledRed     { 0xffff5a3c };
-        const juce::Colour ledTeal    { 0xff3fd0c0 };
-        const juce::Colour ledAmber   { 0xffffc04a };
-        const juce::Colour ledGreen   { 0xff6cff8a };
-        const juce::Colour bandColours[4] = { juce::Colour (0xffe0814a), juce::Colour (0xffd9c25a),
-                                              juce::Colour (0xff6cc7a8), juce::Colour (0xff7aa8e0) };
-    }
+    juce::Image loadPanelImage (const char* resourceName);
 
-    class HeronLookAndFeel : public juce::LookAndFeel_V4
+    // A knob drawn by rotating its photographed cap around its centre.
+    class SpriteKnob : public juce::Slider
     {
     public:
-        HeronLookAndFeel();
-        void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
-                               float startAngle, float endAngle, juce::Slider&) override;
-        void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
-        juce::Label* createSliderTextBox (juce::Slider&) override;
-        juce::Font getLabelFont (juce::Label&) override;
+        SpriteKnob (const heron::panel::Knob& info, float startDeg, float endDeg);
+        void paint (juce::Graphics&) override;
+        bool hitTest (int x, int y) override;
+    private:
+        juce::Image sprite;
+        juce::Point<float> pivot;
+        float photoAngle, startAngle, endAngle, radius;
     };
 
-    // Knob with a role (sets cap colour and number of scale ticks).
-    class Knob : public juce::Slider
+    // A latching push button. Released = the panel photo; pressed = a sunk-in bitmap.
+    class SpriteButton : public juce::Button
     {
     public:
-        enum class Role { Gain, Freq, Bandwidth, Utility };
-        Knob (Role r, int stepsIn = 0) : role (r), steps (stepsIn)
-        {
-            setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 16);
-        }
-        Role role;
-        int steps; // 0 = continuous
+        explicit SpriteButton (const heron::panel::Sprite& info);
+        void paintButton (juce::Graphics&, bool, bool) override;
+        bool hitTest (int x, int y) override;
+    private:
+        juce::Image pressed;
     };
 
-    class LedButton : public juce::ToggleButton
+    // A bat-handle toggle. ON = lever left (as photographed), OFF = lever right.
+    class ToggleSwitch : public juce::Button
     {
     public:
-        LedButton (const juce::String& label, juce::Colour led) : juce::ToggleButton (label), ledColour (led) {}
-        juce::Colour ledColour;
+        explicit ToggleSwitch (const heron::panel::Sprite& info);
+        void paintButton (juce::Graphics&, bool, bool) override;
+    private:
+        juce::Image leverRight;
     };
 
-    class ResponseCurve : public juce::Component
+    class Lamp : public juce::Component
     {
     public:
-        void setSettings (const heron::Settings& s, bool bypassed);
+        Lamp();
+        void setLit (bool shouldBeLit) { if (lit != shouldBeLit) { lit = shouldBeLit; repaint(); } }
         void paint (juce::Graphics&) override;
     private:
-        heron::Settings settings;
-        bool isBypassed = false;
+        juce::Image off;
+        bool lit = true;
     };
 }
 
@@ -77,45 +65,33 @@ public:
 
 private:
     void timerCallback() override;
-    void layoutPanel();
+    void attachChannel (int panelChannel, int paramChannel);
+    void showMenu();
 
-    using Knob = heron::ui::Knob;
-    using LedButton = heron::ui::LedButton;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
-    static constexpr int baseW = 1000, baseH = 560;
-
     HeronEQAudioProcessor& proc;
-    heron::ui::HeronLookAndFeel lnf;
 
     struct Panel : juce::Component
     {
+        Panel();
         void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        juce::Image image;
+        std::function<void()> onMenu;
     } panel;
 
-    heron::ui::ResponseCurve curve;
+    struct KnobSlot { const heron::panel::Knob* info; std::unique_ptr<heron::ui::SpriteKnob> knob; std::unique_ptr<SliderAtt> att; };
+    struct ButtonSlot { juce::String name; std::unique_ptr<heron::ui::SpriteButton> button; std::unique_ptr<ButtonAtt> att; };
+    std::vector<KnobSlot> knobs;
+    std::vector<ButtonSlot> buttons;
 
-    struct BandUI
-    {
-        std::unique_ptr<Knob> gain, freq, bw;
-        std::unique_ptr<LedButton> step, shelf;
-        juce::Label freqReadout;
-        std::unique_ptr<SliderAtt> gainAtt, freqAtt, bwAtt;
-        std::unique_ptr<ButtonAtt> stepAtt, shelfAtt;
-    };
-    std::array<BandUI, 4> bands;
+    std::unique_ptr<heron::ui::ToggleSwitch> ch1Switch, ch2Switch, powerSwitch;
+    std::unique_ptr<ButtonAtt> ch1Att, ch2Att;
+    heron::ui::Lamp lamp;
 
-    Knob lowCut { Knob::Role::Freq, heron::freqs::numLowCut };
-    Knob colourSource { Knob::Role::Utility, 6 };
-    Knob colour { Knob::Role::Utility };
-    LedButton steep { "STEEP", heron::ui::colours::ledAmber };
-    LedButton inButton { "IN", heron::ui::colours::ledGreen };
-    std::unique_ptr<SliderAtt> lowCutAtt, colourSourceAtt, colourAtt;
-    std::unique_ptr<ButtonAtt> steepAtt;
-
-    heron::Settings lastSettings;
-    bool lastBypass = false, first = true;
+    int boundChannel2 = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HeronEQAudioProcessorEditor)
 };

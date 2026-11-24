@@ -11,81 +11,119 @@ static juce::String formatHz (double hz)
     return hz < 100.0 ? juce::String (hz, 1) : juce::String (juce::roundToInt (hz));
 }
 
+// A range whose normalised position moves evenly between the given anchor values,
+// so the knob lines up with the panel's printed scale.
+static juce::NormalisableRange<float> piecewiseRange (std::vector<float> anchors)
+{
+    const float lo = anchors.front(), hi = anchors.back();
+    auto from01 = [anchors] (float, float, float t)
+    {
+        const float pos = juce::jlimit (0.0f, 1.0f, t) * (float) (anchors.size() - 1);
+        const int i = juce::jmin ((int) pos, (int) anchors.size() - 2);
+        return anchors[(size_t) i] + (pos - (float) i) * (anchors[(size_t) i + 1] - anchors[(size_t) i]);
+    };
+    auto to01 = [anchors] (float, float, float v)
+    {
+        v = juce::jlimit (anchors.front(), anchors.back(), v);
+        for (size_t i = 0; i + 1 < anchors.size(); ++i)
+            if (v <= anchors[i + 1])
+                return ((float) i + (v - anchors[i]) / (anchors[i + 1] - anchors[i])) / (float) (anchors.size() - 1);
+        return 1.0f;
+    };
+    return juce::NormalisableRange<float> (lo, hi, from01, to01);
+}
+
+const std::vector<float>& HeronEQAudioProcessor::gainAnchors()
+{
+    static const std::vector<float> a { -12, -10, -8, -6, -4, -3, -2, -1, 0, 1, 2, 3, 4, 6, 8, 10, 12 };
+    return a;
+}
+
+const std::vector<float>& HeronEQAudioProcessor::bandwidthAnchors()
+{
+    // Marks on the panel: .1  .25  1  1.5  2  .  3  .  3.5  .  4
+    static const std::vector<float> a { 0.1f, 0.25f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.25f, 3.5f, 3.75f, 4.0f };
+    return a;
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout HeronEQAudioProcessor::createLayout()
 {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    for (int b = 0; b < 4; ++b)
+    for (int c = 0; c < 2; ++c)
     {
-        const String name = "Band " + String (b + 1) + " ";
-
-        StringArray freqLabels;
-        for (int p = 0; p < freqs::numPositions; ++p)
+        const String chName = "CH" + String (c + 1) + " ";
+        for (int b = 0; b < 4; ++b)
         {
-            const int note = freqs::noteFor (b, p, false);
-            freqLabels.add (String (freqs::noteName (note)) + " " + formatHz (freqs::noteToHz (note)));
+            const String name = chName + "Band " + String (b + 1) + " ";
+
+            StringArray freqLabels;
+            for (int p = 0; p < freqs::numPositions; ++p)
+            {
+                const int note = freqs::noteFor (b, p, false);
+                freqLabels.add (String (freqs::noteName (note)) + " " + formatHz (freqs::noteToHz (note)));
+            }
+            const int defaultPos[4] = { 3, 5, 6, 7 };
+            layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::bandFreq (c, b), 1 }, name + "Freq", freqLabels, defaultPos[b]));
+            layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::bandStep (c, b), 1 }, name + "+1 Step", false));
+
+            layout.add (std::make_unique<AudioParameterFloat> (
+                ParameterID { ids::bandGain (c, b), 1 }, name + "Gain", piecewiseRange (gainAnchors()), 0.0f,
+                AudioParameterFloatAttributes()
+                    .withLabel ("dB")
+                    .withStringFromValueFunction ([] (float v, int)
+                    {
+                        const double g = applyDeadZone (v);
+                        return g == 0.0 ? String ("0.0 dB") : (g > 0 ? "+" : "") + String (g, 1) + " dB";
+                    })));
+
+            layout.add (std::make_unique<AudioParameterFloat> (
+                ParameterID { ids::bandBw (c, b), 1 }, name + "Bandwidth", piecewiseRange (bandwidthAnchors()), 1.5f,
+                AudioParameterFloatAttributes()
+                    .withLabel ("oct")
+                    .withStringFromValueFunction ([] (float v, int) { return String (v, 2) + " oct"; })));
+
+            if (b == 0 || b == 3)
+                layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::bandShelf (c, b), 1 }, name + "Shelf", false));
         }
-        const int defaultPos[4] = { 3, 5, 6, 7 };
-        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::bandFreq (b), 1 }, name + "Freq", freqLabels, defaultPos[b]));
-        layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::bandStep (b), 1 }, name + "+1 Step", false));
 
-        layout.add (std::make_unique<AudioParameterFloat> (
-            ParameterID { ids::bandGain (b), 1 }, name + "Gain",
-            NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
-            AudioParameterFloatAttributes()
-                .withLabel ("dB")
-                .withStringFromValueFunction ([] (float v, int)
-                {
-                    const double g = applyDeadZone (v);
-                    return g == 0.0 ? String ("0.0 dB") : (g > 0 ? "+" : "") + String (g, 1) + " dB";
-                })));
+        StringArray lcLabels { "Out" };
+        for (int i = 1; i < freqs::numLowCut; ++i) lcLabels.add (String ((int) freqs::lowCutHz[i]) + " Hz");
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::lowCut (c), 1 }, chName + "Low Cut", lcLabels, 0));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::lowCutSteep (c), 1 }, chName + "Low Cut Steep", false));
 
-        NormalisableRange<float> bwRange (0.2f, 4.0f,
-            [] (float lo, float hi, float t) { return lo * std::pow (hi / lo, t); },
-            [] (float lo, float hi, float v) { return std::log (v / lo) / std::log (hi / lo); });
-        layout.add (std::make_unique<AudioParameterFloat> (
-            ParameterID { ids::bandBw (b), 1 }, name + "Bandwidth", bwRange, 1.5f,
-            AudioParameterFloatAttributes()
-                .withLabel ("oct")
-                .withStringFromValueFunction ([] (float v, int) { return String (v, 2) + " oct"; })));
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::colourSrc (c), 1 }, chName + "Colour Source",
+            StringArray { "Off", "Band 1", "Band 2", "Band 3", "Band 4", "Full" }, 0));
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::colour (c), 1 }, chName + "Colour",
+            NormalisableRange<float> (0.0f, 10.0f, 0.01f), 0.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1); })));
 
-        if (b == 0 || b == 3)
-            layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::bandShelf (b), 1 }, name + "Shelf", false));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::channelIn (c), 1 }, chName + "In", true));
     }
 
-    StringArray lcLabels { "Out" };
-    for (int i = 1; i < freqs::numLowCut; ++i) lcLabels.add (String ((int) freqs::lowCutHz[i]) + " Hz");
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::lowCut, 1 }, "Low Cut", lcLabels, 0));
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::lowCutSteep, 1 }, "Low Cut Steep", false));
-
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::colourSrc, 1 }, "Colour Source",
-        StringArray { "Off", "Band 1", "Band 2", "Band 3", "Band 4", "Full" }, 0));
-    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::colour, 1 }, "Colour",
-        NormalisableRange<float> (0.0f, 10.0f, 0.01f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1); })));
-
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::link, 1 }, "Link", true));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::bypass, 1 }, "Bypass", false));
     return layout;
 }
 
-heron::Settings HeronEQAudioProcessor::readSettings (const juce::AudioProcessorValueTreeState& s)
+heron::Settings HeronEQAudioProcessor::readSettings (const juce::AudioProcessorValueTreeState& s, int c)
 {
     auto get = [&] (const juce::String& id) { return s.getRawParameterValue (id)->load(); };
     heron::Settings out;
     for (int b = 0; b < 4; ++b)
     {
         auto& band = out.bands[(size_t) b];
-        band.position = (int) get (ids::bandFreq (b));
-        band.plusStep = get (ids::bandStep (b)) > 0.5f;
-        band.gainDb = get (ids::bandGain (b));
-        band.bandwidthOct = get (ids::bandBw (b));
-        band.shelf = (b == 0 || b == 3) && get (ids::bandShelf (b)) > 0.5f;
+        band.position = (int) get (ids::bandFreq (c, b));
+        band.plusStep = get (ids::bandStep (c, b)) > 0.5f;
+        band.gainDb = get (ids::bandGain (c, b));
+        band.bandwidthOct = get (ids::bandBw (c, b));
+        band.shelf = (b == 0 || b == 3) && get (ids::bandShelf (c, b)) > 0.5f;
     }
-    out.lowCutIndex = (int) get (ids::lowCut);
-    out.lowCutSteep = get (ids::lowCutSteep) > 0.5f;
-    out.colourSource = (ColourSource) (int) get (ids::colourSrc);
-    out.colour = get (ids::colour);
+    out.lowCutIndex = (int) get (ids::lowCut (c));
+    out.lowCutSteep = get (ids::lowCutSteep (c)) > 0.5f;
+    out.colourSource = (ColourSource) (int) get (ids::colourSrc (c));
+    out.colour = get (ids::colour (c));
     return out;
 }
 
@@ -135,25 +173,40 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     for (int ch = numCh; ch < buffer.getNumChannels(); ++ch) buffer.clear (ch, 0, buffer.getNumSamples());
     if (numCh == 0 || buffer.getNumSamples() == 0) return;
 
-    // --- Targets from the current parameter values ---
-    const Settings s = readSettings (apvts);
-    BandState target[4];
-    for (int b = 0; b < 4; ++b)
+    const bool linked = apvts.getRawParameterValue (ids::link)->load() > 0.5f;
+    const bool power = ! bypassParam->get();
+
+    // --- Targets for each panel channel (CH1 = left, CH2 = right) ---
+    struct Target { std::array<BandState, 4> bands; double colour, wet, lowCutHz; bool steep; ColourSource src; };
+    std::array<Target, 2> target;
+    for (int c = 0; c < 2; ++c)
     {
-        const auto& bs = s.bands[(size_t) b];
-        target[b].fc = freqs::hzFor (b, juce::jlimit (0, 11, bs.position), bs.plusStep);
-        target[b].gain = applyDeadZone (bs.gainDb);
-        target[b].bw = bs.bandwidthOct;
-        target[b].shelf = bs.shelf;
+        const Settings s = readSettings (apvts, linked ? 0 : c);
+        auto& t = target[(size_t) c];
+        for (int b = 0; b < 4; ++b)
+        {
+            const auto& bs = s.bands[(size_t) b];
+            t.bands[(size_t) b].fc = freqs::hzFor (b, juce::jlimit (0, 11, bs.position), bs.plusStep);
+            t.bands[(size_t) b].gain = applyDeadZone (bs.gainDb);
+            t.bands[(size_t) b].bw = bs.bandwidthOct;
+            t.bands[(size_t) b].shelf = bs.shelf;
+        }
+        t.colour = s.colour / 10.0;
+        t.lowCutHz = freqs::lowCutHz[juce::jlimit (0, freqs::numLowCut - 1, s.lowCutIndex)];
+        t.steep = s.lowCutSteep;
+        t.src = s.colourSource;
+        // The channel IN/OUT switches are per channel, even when the controls are linked.
+        t.wet = (power && apvts.getRawParameterValue (ids::channelIn (c))->load() > 0.5f) ? 1.0 : 0.0;
     }
-    const double colourTarget = s.colour / 10.0;
-    const double wetTarget = bypassParam->get() ? 0.0 : 1.0;
-    const double lowCutHz = freqs::lowCutHz[juce::jlimit (0, freqs::numLowCut - 1, s.lowCutIndex)];
 
     if (firstBlock)
     {
-        for (int b = 0; b < 4; ++b) bandState[(size_t) b] = target[b];
-        colourState = colourTarget; wetState = wetTarget;
+        for (int c = 0; c < 2; ++c)
+        {
+            state[(size_t) c].bands = target[(size_t) c].bands;
+            state[(size_t) c].colour = target[(size_t) c].colour;
+            state[(size_t) c].wet = target[(size_t) c].wet;
+        }
         for (auto& c : channels) c.reset();
         firstBlock = false;
     }
@@ -170,37 +223,40 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     {
         const int len = juce::jmin (chunk, n - start);
 
-        std::array<ChannelEQ::BandCoeffs, 4> bc;
-        for (int b = 0; b < 4; ++b)
-        {
-            auto& st = bandState[(size_t) b];
-            st.fc *= std::pow (target[b].fc / st.fc, a);   // glide in log-frequency
-            st.gain += (target[b].gain - st.gain) * a;
-            st.bw *= std::pow (target[b].bw / st.bw, a);
-            st.shelf = target[b].shelf;
-
-            auto& c = bc[(size_t) b];
-            c.fc = st.fc;
-            if (st.shelf) { c.mode = b == 0 ? SVF::Mode::LowPass : SVF::Mode::HighPass; c.q = bandwidthToShelfQ (st.bw); }
-            else          { c.mode = SVF::Mode::BandPass; c.q = bandwidthToQ (st.bw); }
-            const double A = std::pow (10.0, st.gain / 20.0);
-            c.k = st.gain > 0 ? A - 1.0 : 0.0;
-            c.m = st.gain < 0 ? 1.0 / A - 1.0 : 0.0;
-        }
-        colourState += (colourTarget - colourState) * a;
-
-        const double wetStart = wetState;
-        wetState += (wetTarget - wetState) * a;
-        if (std::abs (wetState - wetTarget) < 1e-4) wetState = wetTarget;
-
         for (int ch = 0; ch < numCh; ++ch)
         {
+            const size_t c = (size_t) juce::jmin (ch, 1);
+            auto& st = state[c];
+            const auto& tg = target[c];
+
+            std::array<ChannelEQ::BandCoeffs, 4> bc;
+            for (size_t b = 0; b < 4; ++b)
+            {
+                auto& bs = st.bands[b];
+                bs.fc *= std::pow (tg.bands[b].fc / bs.fc, a);   // glide in log-frequency
+                bs.gain += (tg.bands[b].gain - bs.gain) * a;
+                bs.bw *= std::pow (tg.bands[b].bw / bs.bw, a);
+                bs.shelf = tg.bands[b].shelf;
+
+                auto& k = bc[b];
+                k.fc = bs.fc;
+                if (bs.shelf) { k.mode = b == 0 ? SVF::Mode::LowPass : SVF::Mode::HighPass; k.q = bandwidthToShelfQ (bs.bw); }
+                else          { k.mode = SVF::Mode::BandPass; k.q = bandwidthToQ (bs.bw); }
+                const double A = std::pow (10.0, bs.gain / 20.0);
+                k.k = bs.gain > 0 ? A - 1.0 : 0.0;
+                k.m = bs.gain < 0 ? 1.0 / A - 1.0 : 0.0;
+            }
+            st.colour += (tg.colour - st.colour) * a;
+            const double wetStart = st.wet;
+            st.wet += (tg.wet - st.wet) * a;
+            if (std::abs (st.wet - tg.wet) < 1e-4) st.wet = tg.wet;
+
             auto& eq = channels[(size_t) ch];
-            eq.update (bc, lowCutHz, s.lowCutSteep, s.colourSource, colourState);
+            eq.update (bc, tg.lowCutHz, tg.steep, tg.src, st.colour);
             float* d = os.getChannelPointer ((size_t) ch) + start;
             for (int i = 0; i < len; ++i)
             {
-                const double w = wetStart + (wetState - wetStart) * (i + 1) / len;
+                const double w = wetStart + (st.wet - wetStart) * (i + 1) / len;
                 const double x = d[i];
                 const double y = eq.process (x);
                 d[i] = (float) (w * y + (1.0 - w) * x);

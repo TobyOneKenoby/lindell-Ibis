@@ -4,18 +4,22 @@
 #include <juce_dsp/juce_dsp.h>
 #include "HeronDSP.h"
 
+// Parameter IDs. Every channel control exists twice: "c1_..." (left) and "c2_..." (right).
 namespace ids
 {
-    inline juce::String bandFreq (int b)  { return "b" + juce::String (b + 1) + "_freq"; }
-    inline juce::String bandStep (int b)  { return "b" + juce::String (b + 1) + "_step"; }
-    inline juce::String bandGain (int b)  { return "b" + juce::String (b + 1) + "_gain"; }
-    inline juce::String bandBw (int b)    { return "b" + juce::String (b + 1) + "_bw"; }
-    inline juce::String bandShelf (int b) { return "b" + juce::String (b + 1) + "_shelf"; } // bands 1 and 4
-    inline const juce::String lowCut      = "lc_freq";
-    inline const juce::String lowCutSteep = "lc_steep";
-    inline const juce::String colourSrc   = "colour_src";
-    inline const juce::String colour      = "colour";
-    inline const juce::String bypass      = "bypass";
+    inline juce::String ch (int c, const juce::String& id) { return "c" + juce::String (c + 1) + "_" + id; }
+    inline juce::String bandFreq (int c, int b)  { return ch (c, "b" + juce::String (b + 1) + "_freq"); }
+    inline juce::String bandStep (int c, int b)  { return ch (c, "b" + juce::String (b + 1) + "_step"); }
+    inline juce::String bandGain (int c, int b)  { return ch (c, "b" + juce::String (b + 1) + "_gain"); }
+    inline juce::String bandBw (int c, int b)    { return ch (c, "b" + juce::String (b + 1) + "_bw"); }
+    inline juce::String bandShelf (int c, int b) { return ch (c, "b" + juce::String (b + 1) + "_shelf"); } // bands 1 and 4
+    inline juce::String lowCut (int c)           { return ch (c, "lc_freq"); }
+    inline juce::String lowCutSteep (int c)      { return ch (c, "lc_steep"); }
+    inline juce::String colourSrc (int c)        { return ch (c, "colour_src"); }
+    inline juce::String colour (int c)           { return ch (c, "colour"); }
+    inline juce::String channelIn (int c)        { return ch (c, "in"); }
+    inline const juce::String link   = "link";
+    inline const juce::String bypass = "bypass";   // the POWER switch (inverted)
 }
 
 class HeronEQAudioProcessor : public juce::AudioProcessor
@@ -51,7 +55,11 @@ public:
     juce::AudioProcessorParameter* getBypassParameter() const override;
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    static heron::Settings readSettings (const juce::AudioProcessorValueTreeState&);
+    static heron::Settings readSettings (const juce::AudioProcessorValueTreeState&, int channel);
+
+    // Knob tapers: the printed scale marks are evenly spaced around the knob.
+    static const std::vector<float>& gainAnchors();
+    static const std::vector<float>& bandwidthAnchors();
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -62,10 +70,9 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     std::vector<heron::ChannelEQ> channels;
 
-    // Smoothed control state (shared by all channels: the controls are linked)
     struct BandState { double fc = 1000, gain = 0, bw = 1.5; bool shelf = false; };
-    std::array<BandState, 4> bandState;
-    double colourState = 0, wetState = 1;
+    struct ChannelState { std::array<BandState, 4> bands; double colour = 0, wet = 1; };
+    std::array<ChannelState, 2> state;
     bool firstBlock = true;
     double osRate = 96000;
 
