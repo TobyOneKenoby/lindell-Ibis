@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS (universal VST3 + AU)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHERON_BUILD_HOST_TEST=ON
+
+      - name: Build
+        run: cmake --build build --config Release --target HeronEQ_VST3 HeronEQ_AU HeronDSPTests HeronHostTest -j3
+
+      - name: DSP tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Host test (loads the VST3 like a DAW)
+        run: build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
+
+      - name: Check universal binary
+        run: lipo -info "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3/Contents/MacOS/Heron EQ"
+
+      - name: Ad-hoc sign
+        run: |
+          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
+          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/AU/Heron EQ.component"
+
+      - name: auval
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/HeronEQ_artefacts/Release/AU/Heron EQ.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx Hreq Hern
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3" "dist/HeronEQ-VST3-macOS.zip"
+          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/AU/Heron EQ.component" "dist/HeronEQ-AU-macOS.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HeronEQ-macOS
+          path: dist/*.zip
+
+  linux:
+    name: Linux (tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev mesa-common-dev xvfb
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHERON_BUILD_HOST_TEST=ON
+      - run: cmake --build build --target HeronEQ_VST3 HeronDSPTests HeronHostTest -j4
+      - run: ctest --test-dir build --output-on-failure
+      - run: xvfb-run -a build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
