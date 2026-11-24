@@ -8,9 +8,9 @@ on:
 jobs:
   macos:
     name: macOS (universal VST3 + AU)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHERON_BUILD_HOST_TEST=ON
@@ -55,7 +55,7 @@ jobs:
     name: Linux (tests)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Dependencies
         run: |
           sudo apt-get update
