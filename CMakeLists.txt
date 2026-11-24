@@ -90,7 +90,7 @@ if(HERON_BUILD_HOST_TEST)
     juce_add_console_app(HeronHostTest PRODUCT_NAME "HeronHostTest")
     target_sources(HeronHostTest PRIVATE Tests/HostTest.cpp)
     target_compile_definitions(HeronHostTest PRIVATE
-        JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_AU=1
+        JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_AU=0
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(HeronHostTest PRIVATE
         juce::juce_audio_processors juce::juce_gui_basics
