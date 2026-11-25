@@ -50,7 +50,7 @@ BRAND = "LINDELL PLUGINS"
 # --------------------------------------------------------------------------
 # Panel geometry (panel units)
 # --------------------------------------------------------------------------
-SCALE = 2
+SCALE = 3                       # 3x the panel units: sharp on retina, also when enlarged
 PW, PH = 1916, 370
 W, H = PW * SCALE, PH * SCALE
 PANEL = (2, 2, 1914, 368)
@@ -107,6 +107,30 @@ T.SCALE, T.PW, T.PH, T.W, T.H = SCALE, PW, PH, W, H
 T.LOGOS = LOGOS
 T.LAMP = LAMP
 T.TOGGLE_R = TOGGLE_R
+T.TOGGLE_FRAME = 144            # Tracker toggle / lamp frames at 3x
+T.LAMP_FRAME = 300
+
+
+def clean_finish(img, blur=0.55, grain=1.6, seed=0, sharpen=0.45):
+    """A clean product-render finish (replaces the Tracker's camera look):
+    no sensor grain or chroma noise, only a trace of lens softness, a light
+    sharpen without halos, and the same filmic highlight roll-off."""
+    rgba = img.mode == "RGBA"
+    a = np.asarray(img).astype(np.float32)
+    rgb = a[..., :3]
+    b = 0.30 * blur
+    if b > 0:
+        rgb = ndimage.gaussian_filter(rgb, (b, b, 0))
+    rgb = rgb + 0.20 * sharpen * (rgb - ndimage.gaussian_filter(rgb, (1.5, 1.5, 0)))
+    x = np.clip(rgb / 255.0, 0, 3.0)
+    x = np.where(x > 0.80, 0.80 + (1 - np.exp(-(x - 0.80) / 0.20)) * 0.20, x)
+    rgb = x * 255
+    if rgba:
+        return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), a[..., 3:]]).astype(np.uint8), "RGBA")
+    return Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), "RGB")
+
+
+T.photo_finish = clean_finish
 P = T.P
 polar = T.polar
 smoothstep = T.smoothstep
@@ -258,14 +282,12 @@ def logo_mask():
 
 def apply_ink(rgb, ink, colour, brushed, sheen, rng):
     """silk-screen ink exactly as on the Tracker faceplate, in any colour"""
-    rough = ndimage.gaussian_filter(rng.normal(size=ink.shape).astype(np.float32), 0.7)
-    ink = smoothstep(0.30, 0.70, ndimage.gaussian_filter(ink, 0.9) + 0.09 * rough)
-    ink = ndimage.gaussian_filter(ink, 0.75)
-    mottle = ndimage.gaussian_filter(rng.normal(size=ink.shape).astype(np.float32), 2.5)
-    ink = np.clip(ink * (0.97 + 0.05 * mottle / (mottle.std() + 1e-6)), 0, 1)
-    ink = np.maximum(ink, 0.10 * ndimage.gaussian_filter(ink, 2.0))
+    # crisp print: the anti-aliased type edge, barely softened, no spread or bleed
+    ink = smoothstep(0.08, 0.92, ndimage.gaussian_filter(ink, 0.45))
+    mottle = ndimage.gaussian_filter(rng.normal(size=ink.shape).astype(np.float32), 3.0)
+    ink = np.clip(ink * (0.985 + 0.02 * mottle / (mottle.std() + 1e-6)), 0, 1)
     ink_col = np.array(colour, np.float32)[None, None, :] * (1.0 + 0.012 * brushed[..., None])
-    ink_col = ink_col + (26.0 * sheen)[..., None]
+    ink_col = ink_col + (8.0 * sheen)[..., None]
     under = ndimage.shift(ndimage.gaussian_filter(ink, 1.6), (2.2, 0.4), order=1)
     rgb *= (1 - 0.20 * under * (1 - ink))[..., None]
     rgb[...] = rgb * (1 - 0.94 * ink[..., None]) + ink_col * (0.94 * ink[..., None])
@@ -286,10 +308,10 @@ def render_panel():
     def streaks(length, amp):
         n = T.box_blur_x(rng.normal(size=(H, W)).astype(np.float32), length)
         return amp * n / n.std()
-    brushed = streaks(160, 3.4) + streaks(40, 2.6) + streaks(9, 1.6) + streaks(900, 1.8)
+    brushed = streaks(240, 2.0) + streaks(60, 1.4) + streaks(14, 0.7) + streaks(1350, 1.4)
     sc = (rng.random((H, W)) < 0.0012).astype(np.float32) * rng.normal(1.0, 0.4, (H, W)).astype(np.float32)
-    sc = T.box_blur_x(sc, 420) * 420 / 30.0
-    brushed += 7.0 * np.clip(sc, -1.5, 1.5)
+    sc = T.box_blur_x(sc, 630) * 630 / 45.0
+    brushed += 3.0 * np.clip(sc, -1.5, 1.5)
     band = ndimage.gaussian_filter1d(rng.normal(size=H).astype(np.float32), 4)
     brushed += 2.0 * band[:, None] / band.std()
     sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
@@ -382,8 +404,8 @@ def render_panel():
 # --------------------------------------------------------------------------
 # KNOBS - the Tracker knob, at two sizes
 # --------------------------------------------------------------------------
-LARGE_FRAME = 176          # same frame as the Tracker knob (radius 74 px here)
-SMALL_FRAME = 112          # radius 47 px
+LARGE_FRAME = 264          # the Tracker knob frame at 3x (radius 111 px)
+SMALL_FRAME = 168          # radius 70 px
 KNOB_FRAMES = 180
 
 
@@ -478,7 +500,7 @@ def render_small_knob_strip():
 # PUSH BUTTONS - glossy moulded caps in a hole in the panel, 2 frames:
 # 0 = out, 1 = pushed in (sits deeper: the hole's edge shades its top)
 # --------------------------------------------------------------------------
-BUTTON_FRAME = 84
+BUTTON_FRAME = 126
 BUTTON_COLOURS = {"red": (196, 26, 20), "black": (24, 23, 23), "white": (226, 226, 220)}
 
 
@@ -545,7 +567,7 @@ def render_window():
         def streaks(length, amp):
             n = T.box_blur_x(rng.normal(size=(WH, W)).astype(np.float32), length)
             return amp * n / n.std()
-        brushed = streaks(160, 3.4) + streaks(40, 2.6) + streaks(9, 1.6) + streaks(900, 1.8)
+        brushed = streaks(240, 2.0) + streaks(60, 1.4) + streaks(14, 0.7) + streaks(1350, 1.4)
         sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
                  + 1.00 * np.exp(-((u - 0.76) / 0.06) ** 2) + 0.45 * np.exp(-((u - 0.93) / 0.05) ** 2))
         sheen *= 0.55 + 0.45 * (1 - v)

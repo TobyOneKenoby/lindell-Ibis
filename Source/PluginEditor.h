@@ -5,17 +5,33 @@
 #include "PluginProcessor.h"
 #include "Layout.h"
 
+/** A filmstrip (or single image) kept pre-scaled, with an area-averaging
+    resampler, to the exact physical pixel size it is shown at. Drawing from
+    it is then 1:1, so the rendered art stays sharp at any size and on retina. */
+class ScaledStrip
+{
+public:
+    ScaledStrip() = default;
+    ScaledStrip (const juce::Image& source, int frameW, int frameH, int numFrames);
+    /** The frame scaled to w x h physical pixels (re-scales only when the size changes). */
+    juce::Image frame (int index, int w, int h);
+    int numFrames() const { return frames; }
+
+private:
+    juce::Image src, scaled;
+    int srcW = 0, srcH = 0, frames = 1, curW = -1, curH = -1;
+};
+
 /** A rotary control drawn from a pre-rendered filmstrip covering 360 degrees. */
 class FilmstripKnob : public juce::Slider
 {
 public:
-    FilmstripKnob (const juce::Image& strip, int frameSize, int numFrames, float startDeg, float endDeg, bool stepped);
+    FilmstripKnob (ScaledStrip& strip, float startDeg, float endDeg, bool stepped);
     void paint (juce::Graphics&) override;
     bool hitTest (int x, int y) override;
 
 private:
-    juce::Image strip;
-    int frameSize, numFrames;
+    ScaledStrip& strip;
     float startDeg, endDeg;
 };
 
@@ -23,25 +39,23 @@ private:
 class StripButton : public juce::Button
 {
 public:
-    StripButton (const juce::Image& strip, int frameSize);
+    explicit StripButton (ScaledStrip& strip);
     void paintButton (juce::Graphics&, bool, bool) override;
     bool hitTest (int x, int y) override;
 
 private:
-    juce::Image strip;
-    int frameSize;
+    ScaledStrip& strip;
 };
 
 /** Bat toggle seen head-on: frame 0 = lever left (IN / ON), frame 1 = lever right. */
 class FilmstripToggle : public juce::Button
 {
 public:
-    FilmstripToggle (const juce::Image& strip, int frameSize);
+    explicit FilmstripToggle (ScaledStrip& strip);
     void paintButton (juce::Graphics&, bool, bool) override;
 
 private:
-    juce::Image strip;
-    int frameSize;
+    ScaledStrip& strip;
 };
 
 class HeronEQAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
@@ -68,7 +82,7 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     HeronEQAudioProcessor& proc;
-    juce::Image windowImg, panel, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
+    ScaledStrip panel, windowImg, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
 
     struct KnobSlot { const layout::Knob* info; std::unique_ptr<FilmstripKnob> knob; std::unique_ptr<SliderAtt> att; };
     struct ButtonSlot { const layout::Button* info; std::unique_ptr<StripButton> button; std::unique_ptr<ButtonAtt> att; };

@@ -5,66 +5,152 @@ namespace
 {
     juce::Image loadPng (const void* data, int size) { return juce::ImageCache::getFromMemory (data, size); }
 
-    juce::Image frameOf (const juce::Image& strip, int frameSize, int frame)
-    {
-        return strip.getClippedImage ({ 0, frame * frameSize, frameSize, frameSize });
-    }
-
     bool insideCircle (const juce::Component& c, int x, int y, float fraction)
     {
         const auto b = c.getLocalBounds().toFloat();
         return b.getCentre().getDistanceFrom ({ (float) x, (float) y }) <= b.getWidth() * 0.5f * fraction;
     }
+
+    /** Area-averaging (box-filter) resample of one axis: every output pixel is the
+        exact coverage-weighted mean of the source pixels under it. Works on the
+        premultiplied ARGB bytes, so edges and alpha stay clean. */
+    void resampleAxis (const float* src, int n, int stride, int count, int cstride,
+                       float* dst, int m, int dstride, int dcstride)
+    {
+        const double ratio = (double) n / (double) m;
+        for (int c = 0; c < count; ++c)
+        {
+            const float* s = src + (size_t) c * (size_t) cstride;
+            float* d = dst + (size_t) c * (size_t) dcstride;
+            for (int o = 0; o < m; ++o)
+            {
+                const double a = o * ratio, b = a + ratio;
+                const int i0 = (int) a, i1 = juce::jmin (n - 1, (int) std::ceil (b) - 1);
+                double acc[4] = { 0, 0, 0, 0 };
+                for (int i = i0; i <= i1; ++i)
+                {
+                    const double w = juce::jmin (b, (double) i + 1.0) - juce::jmax (a, (double) i);
+                    const float* px = s + (size_t) i * (size_t) stride;
+                    for (int k = 0; k < 4; ++k) acc[k] += w * px[k];
+                }
+                float* q = d + (size_t) o * (size_t) dstride;
+                for (int k = 0; k < 4; ++k) q[k] = (float) (acc[k] / ratio);
+            }
+        }
+    }
+
+    /** High-quality scale of a whole image to exactly w x h. */
+    juce::Image hqScale (const juce::Image& srcIn, int w, int h)
+    {
+        w = juce::jmax (1, w); h = juce::jmax (1, h);
+        const auto src = srcIn.convertedToFormat (juce::Image::ARGB);
+        const int sw = src.getWidth(), sh = src.getHeight();
+        if (w >= sw || h >= sh)        // enlarging: smooth bilinear is right
+        {
+            juce::Image out (juce::Image::ARGB, w, h, true);
+            juce::Graphics g (out);
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImage (src, 0, 0, w, h, 0, 0, sw, sh);
+            return out;
+        }
+        std::vector<float> in ((size_t) sw * (size_t) sh * 4), mid ((size_t) w * (size_t) sh * 4), fin ((size_t) w * (size_t) h * 4);
+        {
+            const juce::Image::BitmapData bd (src, juce::Image::BitmapData::readOnly);
+            for (int y = 0; y < sh; ++y)
+            {
+                const auto* row = bd.getLinePointer (y);
+                for (int x = 0; x < sw * 4; ++x) in[(size_t) y * (size_t) sw * 4 + (size_t) x] = row[x];
+            }
+        }
+        resampleAxis (in.data(), sw, 4, sh, sw * 4, mid.data(), w, 4, w * 4);       // horizontal
+        resampleAxis (mid.data(), sh, w * 4, w, 4, fin.data(), h, w * 4, 4);         // vertical
+        juce::Image out (juce::Image::ARGB, w, h, false);
+        const juce::Image::BitmapData bd (out, juce::Image::BitmapData::writeOnly);
+        for (int y = 0; y < h; ++y)
+        {
+            auto* row = bd.getLinePointer (y);
+            for (int x = 0; x < w * 4; ++x)
+                row[x] = (juce::uint8) juce::jlimit (0, 255, juce::roundToInt (fin[(size_t) y * (size_t) w * 4 + (size_t) x]));
+        }
+        return out;
+    }
+
+    /** Draws an image that is already at the physical pixel size of 'area', 1:1. */
+    void drawExact (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> area)
+    {
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (img, area, juce::RectanglePlacement::stretchToFit);
+    }
+
+    float pixelScale (juce::Graphics& g) { return g.getInternalContext().getPhysicalPixelScaleFactor(); }
 }
 
 //==============================================================================
-FilmstripKnob::FilmstripKnob (const juce::Image& s, int fs, int nf, float a0, float a1, bool stepped)
+ScaledStrip::ScaledStrip (const juce::Image& source, int fw, int fh, int n)
+    : src (source), srcW (fw), srcH (fh), frames (n) {}
+
+juce::Image ScaledStrip::frame (int index, int w, int h)
+{
+    if (w != curW || h != curH)
+    {
+        scaled = juce::Image (juce::Image::ARGB, w, h * frames, true);
+        juce::Graphics g (scaled);
+        for (int i = 0; i < frames; ++i)    // frame by frame, so neighbours never bleed together
+            g.drawImageAt (hqScale (src.getClippedImage ({ 0, i * srcH, srcW, srcH }), w, h), 0, i * h);
+        curW = w; curH = h;
+    }
+    return scaled.getClippedImage ({ 0, juce::jlimit (0, frames - 1, index) * h, w, h });
+}
+
+//==============================================================================
+FilmstripKnob::FilmstripKnob (ScaledStrip& s, float a0, float a1, bool stepped)
     : juce::Slider (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox),
-      strip (s), frameSize (fs), numFrames (nf), startDeg (a0), endDeg (a1)
+      strip (s), startDeg (a0), endDeg (a1)
 {
     setMouseDragSensitivity (stepped ? 160 : 260);
-    setPaintingIsUnclipped (true);
     setRotaryParameters (juce::degreesToRadians (startDeg + 360.0f), juce::degreesToRadians (endDeg + 360.0f), true);
 }
 
 void FilmstripKnob::paint (juce::Graphics& g)
 {
+    const int n = strip.numFrames();
     const float norm = (float) valueToProportionOfLength (getValue());
     float ang = std::fmod (startDeg + norm * (endDeg - startDeg), 360.0f);
     if (ang < 0) ang += 360.0f;
-    const int frame = juce::roundToInt (ang / 360.0f * (float) numFrames) % numFrames;
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (frameOf (strip, frameSize, frame), getLocalBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+    const int frame = juce::roundToInt (ang / 360.0f * (float) n) % n;
+    const float k = pixelScale (g);
+    drawExact (g, strip.frame (frame, juce::roundToInt ((float) getWidth() * k), juce::roundToInt ((float) getHeight() * k)),
+               getLocalBounds().toFloat());
 }
 
 bool FilmstripKnob::hitTest (int x, int y) { return insideCircle (*this, x, y, 0.85f); }
 
 //==============================================================================
-StripButton::StripButton (const juce::Image& s, int fs) : juce::Button ({}), strip (s), frameSize (fs)
+StripButton::StripButton (ScaledStrip& s) : juce::Button ({}), strip (s)
 {
     setClickingTogglesState (true);
 }
 
 void StripButton::paintButton (juce::Graphics& g, bool, bool)
 {
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (frameOf (strip, frameSize, getToggleState() ? 1 : 0), getLocalBounds().toFloat(),
-                 juce::RectanglePlacement::stretchToFit);
+    const float k = pixelScale (g);
+    drawExact (g, strip.frame (getToggleState() ? 1 : 0, juce::roundToInt ((float) getWidth() * k), juce::roundToInt ((float) getHeight() * k)),
+               getLocalBounds().toFloat());
 }
 
 bool StripButton::hitTest (int x, int y) { return insideCircle (*this, x, y, 0.85f); }
 
 //==============================================================================
-FilmstripToggle::FilmstripToggle (const juce::Image& s, int fs) : juce::Button ({}), strip (s), frameSize (fs)
+FilmstripToggle::FilmstripToggle (ScaledStrip& s) : juce::Button ({}), strip (s)
 {
     setClickingTogglesState (true);
 }
 
 void FilmstripToggle::paintButton (juce::Graphics& g, bool, bool)
 {
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (frameOf (strip, frameSize, getToggleState() ? 0 : 1), getLocalBounds().toFloat(),
-                 juce::RectanglePlacement::stretchToFit);
+    const float k = pixelScale (g);
+    drawExact (g, strip.frame (getToggleState() ? 0 : 1, juce::roundToInt ((float) getWidth() * k), juce::roundToInt ((float) getHeight() * k)),
+               getLocalBounds().toFloat());
 }
 
 //==============================================================================
@@ -102,39 +188,47 @@ static bool isStepped (layout::KnobKind k)
 HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
-    panel       = loadPng (BinaryData::panel_png, BinaryData::panel_pngSize);
-    windowImg   = loadPng (BinaryData::window_png, BinaryData::window_pngSize);
+    auto strip = [] (const void* data, int size, int fw, int fh, int n)
+    {
+        return ScaledStrip (loadPng (data, size), fw, fh, n);
+    };
+    {
+        const auto pi = loadPng (BinaryData::panel_png, BinaryData::panel_pngSize);
+        panel = ScaledStrip (pi, pi.getWidth(), pi.getHeight(), 1);
+        const auto wi = loadPng (BinaryData::window_png, BinaryData::window_pngSize);
+        windowImg = ScaledStrip (wi, wi.getWidth(), wi.getHeight(), 1);
+    }
     for (int i = 0; i < fftSize; ++i)
         hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
     specIn.fill (-120.0f); specOut.fill (-120.0f);
-    knobLarge   = loadPng (BinaryData::knob_large_strip_png, BinaryData::knob_large_strip_pngSize);
-    knobSmall   = loadPng (BinaryData::knob_small_strip_png, BinaryData::knob_small_strip_pngSize);
-    buttonRed   = loadPng (BinaryData::button_red_strip_png, BinaryData::button_red_strip_pngSize);
-    buttonBlack = loadPng (BinaryData::button_black_strip_png, BinaryData::button_black_strip_pngSize);
-    buttonWhite = loadPng (BinaryData::button_white_strip_png, BinaryData::button_white_strip_pngSize);
-    toggleStrip = loadPng (BinaryData::toggle_strip_png, BinaryData::toggle_strip_pngSize);
-    lampStrip   = loadPng (BinaryData::lamp_strip_png, BinaryData::lamp_strip_pngSize);
+    const int lk = layout::largeKnobFrame, sk = layout::smallKnobFrame, bf = layout::buttonFrame;
+    const int tf = layout::toggleFrame, lf = layout::lampFrame, nf = layout::knobFrames;
+    knobLarge   = strip (BinaryData::knob_large_strip_png, BinaryData::knob_large_strip_pngSize, lk, lk, nf);
+    knobSmall   = strip (BinaryData::knob_small_strip_png, BinaryData::knob_small_strip_pngSize, sk, sk, nf);
+    buttonRed   = strip (BinaryData::button_red_strip_png, BinaryData::button_red_strip_pngSize, bf, bf, 2);
+    buttonBlack = strip (BinaryData::button_black_strip_png, BinaryData::button_black_strip_pngSize, bf, bf, 2);
+    buttonWhite = strip (BinaryData::button_white_strip_png, BinaryData::button_white_strip_pngSize, bf, bf, 2);
+    toggleStrip = strip (BinaryData::toggle_strip_png, BinaryData::toggle_strip_pngSize, tf, tf, 2);
+    lampStrip   = strip (BinaryData::lamp_strip_png, BinaryData::lamp_strip_pngSize, lf, lf, 2);
 
     for (const auto& k : layout::knobs)
     {
         const auto sw = layout::sweepFor (k.kind);
-        auto knob = std::make_unique<FilmstripKnob> (k.large ? knobLarge : knobSmall,
-                                                     k.large ? layout::largeKnobFrame : layout::smallKnobFrame,
-                                                     layout::knobFrames, sw.startDeg, sw.endDeg, isStepped (k.kind));
+        auto knob = std::make_unique<FilmstripKnob> (k.large ? knobLarge : knobSmall, sw.startDeg, sw.endDeg, isStepped (k.kind));
         addAndMakeVisible (*knob);
         knobs.push_back ({ &k, std::move (knob), nullptr });
     }
     for (const auto& b : layout::buttons)
     {
-        const auto& strip = b.colour == layout::ButtonColour::Red ? buttonRed
-                          : b.colour == layout::ButtonColour::Black ? buttonBlack : buttonWhite;
-        auto button = std::make_unique<StripButton> (strip, layout::buttonFrame);
+        auto& bs = b.colour == layout::ButtonColour::Red ? buttonRed
+                 : b.colour == layout::ButtonColour::Black ? buttonBlack : buttonWhite;
+        auto button = std::make_unique<StripButton> (bs);
         addAndMakeVisible (*button);
         buttons.push_back ({ &b, std::move (button), nullptr });
     }
     for (const auto& t : layout::toggles)
     {
-        auto toggle = std::make_unique<FilmstripToggle> (toggleStrip, layout::toggleFrame);
+        auto toggle = std::make_unique<FilmstripToggle> (toggleStrip);
         addAndMakeVisible (*toggle);
         if (juce::String (t.name) == "ch1") ch1Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (0), *toggle);
         if (juce::String (t.name) == "ch2") ch2Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (1), *toggle);
@@ -254,18 +348,22 @@ void HeronEQAudioProcessorEditor::showMenu()
 void HeronEQAudioProcessorEditor::paint (juce::Graphics& g)
 {
     const float k = (float) getWidth() / layout::panelW;
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (panel, { 0.0f, 0.0f, (float) getWidth(), layout::panelH * k }, juce::RectanglePlacement::stretchToFit);
+    const float ps = pixelScale (g);
+    const int wpx = juce::roundToInt ((float) getWidth() * ps);
+
+    const int ph = juce::roundToInt (layout::panelH * k * ps);
+    drawExact (g, panel.frame (0, wpx, ph), { 0.0f, 0.0f, (float) getWidth(), (float) ph / ps });
     if (displayOn)
     {
-        g.drawImage (windowImg, { 0.0f, layout::panelH * k, (float) getWidth(), layout::winH * k },
-                     juce::RectanglePlacement::stretchToFit);
+        const int wh = juce::roundToInt (layout::winH * k * ps);
+        drawExact (g, windowImg.frame (0, wpx, wh), { 0.0f, layout::panelH * k, (float) getWidth(), (float) wh / ps });
         paintDisplay (g);
     }
 
     const float lw = (float) layout::lampFrame / layout::assetScale;
-    g.drawImage (frameOf (lampStrip, layout::lampFrame, lampOn ? 1 : 0),
-                 panelRect (layout::lampX, layout::lampY, lw, lw), juce::RectanglePlacement::stretchToFit);
+    const auto lr = panelRect (layout::lampX, layout::lampY, lw, lw);
+    const int lpx = juce::roundToInt (lr.getWidth() * ps);
+    drawExact (g, lampStrip.frame (lampOn ? 1 : 0, lpx, lpx), lr.withSize ((float) lpx / ps, (float) lpx / ps));
 }
 
 void HeronEQAudioProcessorEditor::resized()
