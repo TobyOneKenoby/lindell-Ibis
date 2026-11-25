@@ -270,11 +270,20 @@ void HeronEQAudioProcessorEditor::setDisplayOn (bool on)
 {
     displayOn = on;
     proc.apvts.state.setProperty ("displayOn", on, nullptr);
+
+    // Order matters: setResizeLimits() immediately re-constrains the current bounds.
+    // With the OLD aspect-ratio lock still active that snaps the window toward its
+    // limits (the "zooms to maximum" bug). So: unlock, resize at the same width,
+    // then set the new limits and the new lock.
     const float aspect = layout::panelW / contentH();
+    auto* c = getConstrainer();
+    if (c != nullptr)
+        c->setFixedAspectRatio (0.0);
+    const int w = juce::jlimit (1000, 2800, getWidth() > 0 ? getWidth() : 1440);
+    setSize (w, juce::roundToInt ((float) w / aspect));
     setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
-    if (auto* c = getConstrainer())
+    if ((c = getConstrainer()) != nullptr)
         c->setFixedAspectRatio (aspect);
-    setSize (getWidth(), juce::roundToInt ((float) getWidth() / aspect));
     repaint();
 }
 
