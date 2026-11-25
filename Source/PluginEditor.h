@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include "PluginProcessor.h"
 #include "Layout.h"
 
@@ -58,12 +59,16 @@ private:
     void attachChannel (int panelChannel, int paramChannel);
     void showMenu();
     juce::Rectangle<float> panelRect (float cx, float cy, float w, float h) const;
+    juce::Rectangle<float> winArea (float x0, float y0, float x1, float y1) const;   // display-plate coords
+    juce::Rectangle<int> displayArea() const;
+    void updateSpectrum();
+    void paintDisplay (juce::Graphics&);
 
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     HeronEQAudioProcessor& proc;
-    juce::Image panel, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
+    juce::Image windowImg, panel, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
 
     struct KnobSlot { const layout::Knob* info; std::unique_ptr<FilmstripKnob> knob; std::unique_ptr<SliderAtt> att; };
     struct ButtonSlot { const layout::Button* info; std::unique_ptr<StripButton> button; std::unique_ptr<ButtonAtt> att; };
@@ -75,6 +80,13 @@ private:
     FilmstripToggle* powerSwitch = nullptr;
 
     bool lampOn = true;
+
+    // analyser (same as the Lindell Tracker 2 WINDOW display)
+    static constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
+    juce::dsp::FFT fft { fftOrder };
+    std::array<float, fftSize> hann {};
+    std::array<float, fftSize * 2> fftBuf {};
+    std::array<float, fftSize / 2> specIn {}, specOut {};
     int boundChannel2 = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HeronEQAudioProcessorEditor)

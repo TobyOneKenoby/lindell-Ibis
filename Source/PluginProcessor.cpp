@@ -211,6 +211,18 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         firstBlock = false;
     }
 
+    // --- Analyser: input (pre) ---
+    const int numIn = buffer.getNumSamples();
+    {
+        const int w = anaWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < numIn; ++i)
+        {
+            float m = 0.0f;
+            for (int ch = 0; ch < numCh; ++ch) m += buffer.getSample (ch, i);
+            anaIn[(size_t) ((w + i) & (analyserSize - 1))] = m / (float) numCh;
+        }
+    }
+
     // --- Oversampled processing ---
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), (size_t) numCh, (size_t) buffer.getNumSamples());
     auto os = oversampler->processSamplesUp (block);
@@ -265,6 +277,18 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     }
 
     oversampler->processSamplesDown (block);
+
+    // --- Analyser: output (post) ---
+    {
+        const int w = anaWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < numIn; ++i)
+        {
+            float m = 0.0f;
+            for (int ch = 0; ch < numCh; ++ch) m += buffer.getSample (ch, i);
+            anaOut[(size_t) ((w + i) & (analyserSize - 1))] = m / (float) numCh;
+        }
+        anaWrite.store ((w + numIn) & (analyserSize - 1), std::memory_order_release);
+    }
 }
 
 //==============================================================================

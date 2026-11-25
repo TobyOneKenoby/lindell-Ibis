@@ -103,6 +103,10 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     : AudioProcessorEditor (&p), proc (p)
 {
     panel       = loadPng (BinaryData::panel_png, BinaryData::panel_pngSize);
+    windowImg   = loadPng (BinaryData::window_png, BinaryData::window_pngSize);
+    for (int i = 0; i < fftSize; ++i)
+        hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
+    specIn.fill (-120.0f); specOut.fill (-120.0f);
     knobLarge   = loadPng (BinaryData::knob_large_strip_png, BinaryData::knob_large_strip_pngSize);
     knobSmall   = loadPng (BinaryData::knob_small_strip_png, BinaryData::knob_small_strip_pngSize);
     buttonRed   = loadPng (BinaryData::button_red_strip_png, BinaryData::button_red_strip_pngSize);
@@ -152,7 +156,7 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
         }
     };
 
-    const float aspect = layout::panelW / layout::panelH;
+    const float aspect = layout::panelW / (layout::panelH + layout::winH);
     setResizable (true, false);
     setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
     if (auto* c = getConstrainer())
@@ -160,7 +164,7 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     setSize (1440, juce::roundToInt (1440 / aspect));
 
     timerCallback();
-    startTimerHz (20);
+    startTimerHz (30);
 }
 
 HeronEQAudioProcessorEditor::~HeronEQAudioProcessorEditor() { stopTimer(); }
@@ -234,8 +238,12 @@ void HeronEQAudioProcessorEditor::showMenu()
 
 void HeronEQAudioProcessorEditor::paint (juce::Graphics& g)
 {
+    const float k = (float) getWidth() / layout::panelW;
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (panel, getLocalBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+    g.drawImage (panel, { 0.0f, 0.0f, (float) getWidth(), layout::panelH * k }, juce::RectanglePlacement::stretchToFit);
+    g.drawImage (windowImg, { 0.0f, layout::panelH * k, (float) getWidth(), layout::winH * k },
+                 juce::RectanglePlacement::stretchToFit);
+    paintDisplay (g);
 
     const float lw = (float) layout::lampFrame / layout::assetScale;
     g.drawImage (frameOf (lampStrip, layout::lampFrame, lampOn ? 1 : 0),
@@ -265,10 +273,163 @@ void HeronEQAudioProcessorEditor::timerCallback()
 
     const bool power = proc.apvts.getRawParameterValue (ids::bypass)->load() < 0.5f;
     powerSwitch->setToggleState (power, juce::dontSendNotification);
+
+    updateSpectrum();
+    repaint (displayArea());
     if (power != lampOn)
     {
         lampOn = power;
         const float lw = (float) layout::lampFrame / layout::assetScale;
         repaint (panelRect (layout::lampX, layout::lampY, lw, lw).toNearestInt().expanded (2));
+    }
+}
+
+//==============================================================================
+// Analyser display: spectrum (as on the Lindell Tracker 2) + the EQ curve
+//==============================================================================
+juce::Rectangle<float> HeronEQAudioProcessorEditor::winArea (float x0, float y0, float x1, float y1) const
+{
+    const float k = (float) getWidth() / layout::panelW;
+    const float top = layout::panelH * k;
+    return { x0 * k, top + y0 * k, (x1 - x0) * k, (y1 - y0) * k };
+}
+
+juce::Rectangle<int> HeronEQAudioProcessorEditor::displayArea() const
+{
+    return winArea (layout::dispX0, layout::dispY0, layout::dispX1, layout::dispY1).toNearestInt().expanded (2);
+}
+
+void HeronEQAudioProcessorEditor::updateSpectrum()
+{
+    const int w = proc.anaWrite.load (std::memory_order_acquire);
+    auto analyse = [this, w] (const std::array<float, HeronEQAudioProcessor::analyserSize>& ring, std::array<float, fftSize / 2>& out)
+    {
+        fftBuf.fill (0.0f);
+        for (int i = 0; i < fftSize; ++i)
+            fftBuf[(size_t) i] = ring[(size_t) ((w - fftSize + i) & (HeronEQAudioProcessor::analyserSize - 1))] * hann[(size_t) i];
+        fft.performFrequencyOnlyForwardTransform (fftBuf.data());
+        const float norm = 4.0f / (float) fftSize;          // 0 dBFS sine -> 0 dB (Hann coherent gain 0.5)
+        for (int i = 0; i < fftSize / 2; ++i)
+        {
+            const float db = juce::Decibels::gainToDecibels (fftBuf[(size_t) i] * norm, -120.0f);
+            float& v = out[(size_t) i];
+            v = db > v ? 0.6f * db + 0.4f * v : juce::jmax (db, v - 1.6f);   // quick rise, smooth fall
+        }
+    };
+    analyse (proc.anaIn, specIn);
+    analyse (proc.anaOut, specOut);
+}
+
+void HeronEQAudioProcessorEditor::paintDisplay (juce::Graphics& g)
+{
+    using namespace juce;
+    const auto screen = winArea (layout::dispX0, layout::dispY0, layout::dispX1, layout::dispY1).reduced (3.0f);
+    const float k = (float) getWidth() / layout::panelW;
+
+    // faint LCD backlight
+    ColourGradient back (Colour (0xff0c1d2a).withAlpha (0.85f), screen.getCentreX(), screen.getY(),
+                         Colours::transparentBlack, screen.getCentreX(), screen.getBottom(), false);
+    g.setGradientFill (back);
+    g.fillRoundedRectangle (screen, 5.0f * k);
+
+    const auto plot = winArea (layout::specX0, layout::specY0, layout::specX1, layout::specY1);
+    const double fs = jmax (1.0, proc.getSampleRate());
+    auto xFor = [&plot] (double f) { return plot.getX() + plot.getWidth() * (float) std::log10 (f / 20.0) / 3.0f; };
+    auto freqForX = [&plot] (float x) { return 20.0 * std::pow (1000.0, (double) jlimit (0.0f, 1.0f, (x - plot.getX()) / plot.getWidth())); };
+    auto yForSpec = [&plot] (float db) { return plot.getY() + plot.getHeight() * jlimit (0.0f, 1.0f, -db / layout::specDb); };
+    auto yForEq = [&plot] (float db) { return plot.getY() + plot.getHeight() * (0.5f - db / (2.0f * layout::eqDb)); };
+
+    auto specPath = [&] (const std::array<float, fftSize / 2>& sp, bool closed)
+    {
+        Path p;
+        const float step = jmax (1.5f, 1.5f * k);
+        bool first = true;
+        if (closed) { p.startNewSubPath (plot.getX(), plot.getBottom()); first = false; }
+        for (float x = plot.getX(); x <= plot.getRight(); x += step)
+        {
+            const float t0 = (x - plot.getX()) / plot.getWidth(), t1 = (x + step - plot.getX()) / plot.getWidth();
+            const float b0 = (float) (20.0 * std::pow (1000.0, t0) * fftSize / fs), b1 = (float) (20.0 * std::pow (1000.0, t1) * fftSize / fs);
+            float db = -120.0f;
+            if (b1 - b0 < 1.0f)
+            {
+                const int i = jlimit (1, fftSize / 2 - 2, (int) b0);
+                const float fr = jlimit (0.0f, 1.0f, b0 - (float) i);
+                db = sp[(size_t) i] + fr * (sp[(size_t) i + 1] - sp[(size_t) i]);
+            }
+            else
+                for (int i = jlimit (1, fftSize / 2 - 1, (int) b0); i <= jlimit (1, fftSize / 2 - 1, (int) b1); ++i)
+                    db = jmax (db, sp[(size_t) i]);
+            const float y = yForSpec (db);
+            if (first) { p.startNewSubPath (x, y); first = false; } else p.lineTo (x, y);
+        }
+        if (closed) { p.lineTo (plot.getRight(), plot.getBottom()); p.closeSubPath(); }
+        return p;
+    };
+
+    Graphics::ScopedSaveState ss (g);
+    g.reduceClipRegion (plot.toNearestInt().expanded (0, 2));
+
+    // ---- spectrum: input (faint line) and output (filled) -----------------
+    g.setColour (Colour (0xffc8d2da).withAlpha (0.28f));
+    g.strokePath (specPath (specIn, false), PathStrokeType (1.0f * k));
+    const auto out = specPath (specOut, true);
+    ColourGradient gr (Colour (0xff3aa7d8).withAlpha (0.50f), 0, plot.getY(), Colour (0xff0f4767).withAlpha (0.12f), 0, plot.getBottom(), false);
+    g.setGradientFill (gr);
+    g.fillPath (out);
+    g.setColour (Colour (0xff7fd2f2).withAlpha (0.75f));
+    g.strokePath (out, PathStrokeType (1.0f * k));
+
+    // ---- EQ curve(s) ------------------------------------------------------
+    const bool linked = proc.apvts.getRawParameterValue (ids::link)->load() > 0.5f;
+    const bool power = proc.apvts.getRawParameterValue (ids::bypass)->load() < 0.5f;
+    const int numCurves = linked ? 1 : 2;
+    const Colour glow[2] = { Colour (0xffffd9a0), Colour (0xffa0ffe0) };
+    const Colour line[2] = { Colour (0xfff3e3bf), Colour (0xffbff3e3) };
+
+    for (int c = numCurves - 1; c >= 0; --c)
+    {
+        const auto s = HeronEQAudioProcessor::readSettings (proc.apvts, c);
+        const bool in = power && proc.apvts.getRawParameterValue (ids::channelIn (c))->load() > 0.5f;
+        const float alpha = in ? 1.0f : 0.35f;
+
+        Path curve;
+        for (float x = plot.getX(); x <= plot.getRight() + 1.0f; x += 2.0f)
+        {
+            const float db = in ? (float) (20.0 * std::log10 (jmax (1.0e-6, heron::magnitudeAt (s, freqForX (x))))) : 0.0f;
+            const float y = yForEq (jlimit (-layout::eqDb - 2.0f, layout::eqDb + 2.0f, db));
+            if (x == plot.getX()) curve.startNewSubPath (x, y); else curve.lineTo (x, y);
+        }
+        g.setColour (glow[c].withAlpha (0.16f * alpha));
+        g.strokePath (curve, PathStrokeType (7.0f * k, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (line[c].withAlpha (alpha));
+        g.strokePath (curve, PathStrokeType (1.8f * k, PathStrokeType::curved, PathStrokeType::rounded));
+
+        // band markers 1-4 at each band's frequency, on the curve
+        g.setFont (FontOptions (9.5f * k * 1.2f, Font::bold));
+        for (int b = 0; b < 4; ++b)
+        {
+            const auto& bs = s.bands[(size_t) b];
+            const double f = heron::freqs::hzFor (b, bs.position, bs.plusStep);
+            const bool active = heron::applyDeadZone (bs.gainDb) != 0.0 && in;
+            const float db = in ? (float) (20.0 * std::log10 (jmax (1.0e-6, heron::magnitudeAt (s, f)))) : 0.0f;
+            const Point<float> pt (xFor (f), yForEq (jlimit (-layout::eqDb, layout::eqDb, db)));
+            const float r = 6.5f * k;
+            g.setColour (Colour (0xff0c1d2a).withAlpha (0.85f));
+            g.fillEllipse (pt.x - r, pt.y - r, 2 * r, 2 * r);
+            g.setColour (line[c].withAlpha (active ? 1.0f : 0.40f));
+            g.drawEllipse (pt.x - r, pt.y - r, 2 * r, 2 * r, 1.2f * k);
+            g.drawText (String (b + 1), Rectangle<float> (pt.x - r, pt.y - r, 2 * r, 2 * r), Justification::centred);
+        }
+    }
+
+    if (! linked)
+    {
+        g.setFont (FontOptions (8.0f * k * 1.2f, Font::bold));
+        for (int c = 0; c < 2; ++c)
+        {
+            g.setColour (line[c]);
+            g.drawText (c == 0 ? "CH1 (L)" : "CH2 (R)", Rectangle<float> (plot.getRight() - 150.0f * k + (float) c * 70.0f * k,
+                        plot.getY() + 14.0f * k, 66.0f * k, 12.0f * k), Justification::centredRight);
+        }
     }
 }

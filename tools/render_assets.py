@@ -72,6 +72,13 @@ SLOTS = [(10, 16, 59, 38), (10, 332, 59, 354), (1857, 16, 1906, 38), (1857, 332,
 DIVIDERS = [287.0, 432.0, 579.0, 726.0, 875.0, 1021.0, 1157.0, 1302.0, 1449.0, 1597.0, 1745.0]
 LOGOS = [("logo_lsr.png", 1782.0, 185.0, 22.0), ("logo_l.png", 1833.0, 185.5, None)]
 
+# Analyser display under the faceplate (its own coordinates, same width)
+WIN_H = 190
+WIN_DISPLAY = (30.0, 10.0, 1886.0, 180.0)       # glass window
+SPEC = (84.0, 24.0, 1832.0, 150.0)              # plot area inside the glass
+SPEC_DB = 72.0                                  # spectrum: 0 .. -72 dBFS (left scale)
+EQ_DB = 18.0                                    # EQ curve: +18 .. -18 dB (right scale), same grid lines
+
 # Knob sweeps (degrees, 0 = 12 o'clock, clockwise); the editor reads these from Layout.h
 SWEEP = dict(gain=(-148.0, 148.0), freq=(-165.0, 165.0), lowcut=(-165.0, 165.0),
              bw=(-150.0, 150.0), colour=(-150.0, 150.0), colsrc=(-60.0, 40.0))
@@ -516,6 +523,74 @@ def render_button_strips():
         strip.save(os.path.join(OUT, f"button_{colour}_strip.png"), optimize=True)
 
 
+
+# --------------------------------------------------------------------------
+# ANALYSER DISPLAY - a second plate under the faceplate: brushed aluminium,
+# a smoked glass window with a printed grid (as the Tracker's WINDOW display)
+# --------------------------------------------------------------------------
+def spec_x(f):
+    x0, _, x1, _ = SPEC
+    return x0 + (x1 - x0) * math.log10(f / 20.0) / 3.0
+
+
+def render_window():
+    WH = int(WIN_H * SCALE)
+    saved = (T.PH, T.H)
+    T.PH, T.H = WIN_H, WH
+    try:
+        rng = T.rng
+        yy, xx = np.mgrid[0:WH, 0:W].astype(np.float32)
+        u, v = xx / W, yy / WH
+
+        def streaks(length, amp):
+            n = T.box_blur_x(rng.normal(size=(WH, W)).astype(np.float32), length)
+            return amp * n / n.std()
+        brushed = streaks(160, 3.4) + streaks(40, 2.6) + streaks(9, 1.6) + streaks(900, 1.8)
+        sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
+                 + 1.00 * np.exp(-((u - 0.76) / 0.06) ** 2) + 0.45 * np.exp(-((u - 0.93) / 0.05) ** 2))
+        sheen *= 0.55 + 0.45 * (1 - v)
+        metal = 182.0 + 44.0 * sheen + brushed * (0.75 + 1.3 * sheen)
+        rgb = np.dstack([metal * 1.000, metal * 0.990, metal * 0.968]).astype(np.float32)
+
+        T.glass_window(rgb, WIN_DISPLAY)
+        G = T.Legend()       # faint grid
+        Lb = T.Legend()      # labels
+        sx0, sy0, sx1, sy1 = SPEC
+        for f in (50, 100, 200, 500, 1000, 2000, 5000, 10000):
+            x = spec_x(f)
+            G.line(x, sy0, x, sy1, 0.7)
+            Lb.text(f"{f // 1000}k" if f >= 1000 else str(f), x, sy1 + 10.0, 6.4, bold=True)
+        Lb.text("20", sx0, sy1 + 10.0, 6.4, bold=True)
+        Lb.text("20k", sx1, sy1 + 10.0, 6.4, bold=True)
+        for i in range(7):                               # shared grid: 12 dB (spectrum) = 6 dB (EQ)
+            y = sy0 + (sy1 - sy0) * i / 6.0
+            G.line(sx0, y, sx1, y, 0.7 if i != 3 else 1.0)
+            Lb.text(str(-12 * i), sx0 - 7.0, y, 6.4, align="r", bold=True)
+            eq = int(EQ_DB - 6 * i)
+            Lb.text(("+" if eq > 0 else "") + str(eq), sx1 + 7.0, y, 6.4, align="l", bold=True)
+        Lb.text("dBFS", sx0 - 7.0, sy0 - 9.0, 5.8, align="r", bold=True)
+        Lb.text("dB", sx1 + 7.0, sy0 - 9.0, 5.8, align="l", bold=True)
+        Lb.text("SPECTRUM   IN / OUT", sx0 + 6.0, sy0 + 8.0, 6.4, align="l", bold=True)
+        Lb.text("EQ CURVE", sx1 - 6.0, sy0 + 8.0, 6.4, align="r", bold=True)
+        T.blend(rgb, (206, 206, 200), ndimage.gaussian_filter(G.mask(), 0.5) * 0.16)
+        T.blend(rgb, (206, 206, 200), ndimage.gaussian_filter(Lb.mask(), 0.5) * 0.80)
+
+        light = (1.16 - 0.28 * v ** 1.25) * (1 - 0.16 * np.abs(2 * u - 1) ** 2.4)
+        light *= 1 - 0.15 * np.exp(-((u - 0.5) / 0.24) ** 2)
+        rgb *= light[..., None]
+        cov = T.rounded_rect_mask(W, WH, P(2), P(1), P(PW - 2), P(WIN_H - 2), P(7))
+        dist = ndimage.distance_transform_edt(cov > 0.5).astype(np.float32)
+        rgb *= (1 - 0.14 * np.exp(-dist / P(1.4)))[..., None]
+        back = np.full_like(rgb, 18.0)
+        out = back * (1 - cov[..., None]) + rgb * cov[..., None]
+        out = T.photo_grade(out, contrast=1.14, bloom=0.45)
+        img = T.photo_finish(T.to_img(out), blur=0.85, grain=2.4, seed=17, sharpen=0.55)
+        img.save(os.path.join(OUT, "window.png"), optimize=True)
+        return img
+    finally:
+        T.PH, T.H = saved
+
+
 # --------------------------------------------------------------------------
 # Layout.h
 # --------------------------------------------------------------------------
@@ -538,6 +613,12 @@ def write_layout_header():
         f"    constexpr float toggleR = {TOGGLE_R}f;",
         f"    constexpr int lampFrame = {T.LAMP_FRAME};",
         f"    constexpr float lampX = {LAMP[0]}f, lampY = {LAMP[1]}f;",
+        "",
+        "    // analyser display under the faceplate (window coordinates, same width)",
+        f"    constexpr float winH = {float(WIN_H)}f;",
+        f"    constexpr float dispX0 = {WIN_DISPLAY[0]}f, dispY0 = {WIN_DISPLAY[1]}f, dispX1 = {WIN_DISPLAY[2]}f, dispY1 = {WIN_DISPLAY[3]}f;",
+        f"    constexpr float specX0 = {SPEC[0]}f, specY0 = {SPEC[1]}f, specX1 = {SPEC[2]}f, specY1 = {SPEC[3]}f;",
+        f"    constexpr float specDb = {SPEC_DB}f, eqDb = {EQ_DB}f;",
         "",
         "    enum class KnobKind { LowCut, ColourSource, Colour, Gain, Freq, Bandwidth };",
         "    enum class ButtonColour { Red, Black, White };",
@@ -573,6 +654,8 @@ if __name__ == "__main__":
     what = sys.argv[1:] or ["all"]
     if "all" in what or "panel" in what:
         render_panel(); print("panel")
+    if "all" in what or "window" in what:
+        render_window(); print("window")
     if "all" in what or "knobs" in what or "large" in what:
         render_knob_strip(LARGE_R, LARGE_FRAME, "knob_large_strip.png"); print("large knob")
     if "smallknob" in what:

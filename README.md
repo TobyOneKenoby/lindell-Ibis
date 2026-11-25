@@ -49,6 +49,11 @@ The panel is rendered with the Lindell Tracker 2 renderer, so the two plug-ins m
 - fluted IBIS-style small knobs on silver nuts for frequency, bandwidth and colour;
 - push buttons, bat toggles and a power lamp.
 
+Under the faceplate is an analyser display, the same as the Tracker's WINDOW display: the
+input spectrum as a faint line, the output spectrum filled in blue (0 to −72 dBFS, left
+scale), and the EQ curve in amber with markers for bands 1–4 (±18 dB, right scale). When
+the channels are unlinked, CH2's curve is drawn in a second colour.
+
 `tools/lindell_render.py` is vendored unchanged from `lindell-tracker-2`.
 `tools/render_assets.py` adds the Ibis layout, its printed scales, the small knob and
 the push buttons. It writes `assets/*.png` and `Source/Layout.h`:

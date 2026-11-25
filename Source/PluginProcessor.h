@@ -63,6 +63,12 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // Analyser feed: mono (L+R)/2 of the input and the output, written by the audio
+    // thread into rings and read by the editor's display (single producer / consumer).
+    static constexpr int analyserSize = 16384;     // power of two
+    std::array<float, analyserSize> anaIn {}, anaOut {};
+    std::atomic<int> anaWrite { 0 };
+
 private:
     static constexpr int oversamplingOrder = 1; // 2x
     static constexpr int chunk = 16;            // coefficient update interval (oversampled samples)

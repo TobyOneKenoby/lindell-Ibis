@@ -49,6 +49,7 @@ juce_add_plugin(HeronEQ
 # GUI bitmaps (rendered by tools/render_assets.py)
 juce_add_binary_data(HeronAssets HEADER_NAME BinaryData.h NAMESPACE BinaryData SOURCES
     assets/panel.png
+    assets/window.png
     assets/knob_large_strip.png
     assets/knob_small_strip.png
     assets/button_red_strip.png

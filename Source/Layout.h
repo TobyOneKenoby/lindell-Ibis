@@ -14,6 +14,12 @@ namespace layout
     constexpr int lampFrame = 200;
     constexpr float lampX = 948.0f, lampY = 211.0f;
 
+    // analyser display under the faceplate (window coordinates, same width)
+    constexpr float winH = 190.0f;
+    constexpr float dispX0 = 30.0f, dispY0 = 10.0f, dispX1 = 1886.0f, dispY1 = 180.0f;
+    constexpr float specX0 = 84.0f, specY0 = 24.0f, specX1 = 1832.0f, specY1 = 150.0f;
+    constexpr float specDb = 72.0f, eqDb = 18.0f;
+
     enum class KnobKind { LowCut, ColourSource, Colour, Gain, Freq, Bandwidth };
     enum class ButtonColour { Red, Black, White };
 
