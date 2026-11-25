@@ -297,6 +297,40 @@ def apply_ink(rgb, ink, colour, brushed, sheen, rng):
 
 
 # --------------------------------------------------------------------------
+# PLATE MATERIAL - one brushed aluminium for the faceplate and the display
+# plate (the display plate's look), lit as ONE surface: 'vg' runs 0..1 over
+# faceplate + display, split by their heights, so the light carries straight
+# across the seam instead of each plate starting bright at its own top.
+# --------------------------------------------------------------------------
+def plate_v(v_local, lower):
+    total = PH + WIN_H
+    return (WIN_H * v_local + PH) / total if lower else (PH * v_local) / total
+
+
+def plate_material(u, vg, rng):
+    hh, ww = u.shape
+
+    def streaks(length, amp):
+        n = T.box_blur_x(rng.normal(size=(hh, ww)).astype(np.float32), length)
+        return amp * n / n.std()
+    brushed = streaks(240, 2.0) + streaks(60, 1.4) + streaks(14, 0.7) + streaks(1350, 1.4)
+    sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
+             + 1.00 * np.exp(-((u - 0.76) / 0.06) ** 2) + 0.45 * np.exp(-((u - 0.93) / 0.05) ** 2))
+    sheen *= 0.55 + 0.45 * (1 - vg)
+    return brushed, sheen
+
+
+def plate_rgb(brushed, sheen):
+    metal = 182.0 + 44.0 * sheen + brushed * (0.75 + 1.3 * sheen)
+    return np.dstack([metal * 1.000, metal * 0.990, metal * 0.968]).astype(np.float32)
+
+
+def plate_light(u, vg):
+    light = (1.14 - 0.24 * vg ** 1.1) * (1 - 0.16 * np.abs(2 * u - 1) ** 2.4)
+    return light * (1 - 0.15 * np.exp(-((u - 0.5) / 0.24) ** 2))
+
+
+# --------------------------------------------------------------------------
 # PANEL - same material, ink and lighting pipeline as the Tracker faceplate
 # --------------------------------------------------------------------------
 def render_panel():
@@ -308,18 +342,8 @@ def render_panel():
     def streaks(length, amp):
         n = T.box_blur_x(rng.normal(size=(H, W)).astype(np.float32), length)
         return amp * n / n.std()
-    brushed = streaks(240, 2.0) + streaks(60, 1.4) + streaks(14, 0.7) + streaks(1350, 1.4)
-    sc = (rng.random((H, W)) < 0.0012).astype(np.float32) * rng.normal(1.0, 0.4, (H, W)).astype(np.float32)
-    sc = T.box_blur_x(sc, 630) * 630 / 45.0
-    brushed += 3.0 * np.clip(sc, -1.5, 1.5)
-    band = ndimage.gaussian_filter1d(rng.normal(size=H).astype(np.float32), 4)
-    brushed += 2.0 * band[:, None] / band.std()
-    sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
-             + 1.00 * np.exp(-((u - 0.76) / 0.06) ** 2) + 0.45 * np.exp(-((u - 0.93) / 0.05) ** 2))
-    sheen *= 0.55 + 0.45 * (1 - v)
-    sheen += 0.12 * ndimage.gaussian_filter1d(rng.normal(size=W).astype(np.float32), 90)[None, :] * 8
-    metal = 190.0 + 48.0 * sheen + brushed * (0.75 + 1.3 * sheen)
-    rgb = np.dstack([metal * 1.000, metal * 0.990, metal * 0.968]).astype(np.float32)
+    brushed, sheen = plate_material(u, plate_v(v, False), rng)
+    rgb = plate_rgb(brushed, sheen)
 
     # ---- silk-screen ink
     L = T.Legend()
@@ -350,8 +374,8 @@ def render_panel():
     toggles = list(TOGGLES.values())
     for items, R_ in ((large, LARGE_R), (small, SMALL_R)):
         k = R_ / T.KNOB_R
-        shadow += disc_shadow(items, R_ * 1.25, 16.0 * k, 18.0 * k, 0.42)
-        shadow += disc_shadow(items, R_ * 0.98, 9.0 * k, 8.0 * k, 0.45)
+        shadow += disc_shadow(items, R_ * 1.10, 10.0 * k, 9.0 * k, 0.16)   # short, soft pool
+        shadow += disc_shadow(items, R_ * 0.98, 6.0 * k, 5.0 * k, 0.30)
         shadow += disc_shadow(items, R_ * 1.0, 3.0 * k, 3.0 * k, 0.40)
         shadow += disc_shadow(items, R_ * 1.03, 0.6, 1.2, 0.55)
     shadow += disc_shadow(buttons, BUTTON_R * 1.05, 4.0, 4.0, 0.40)
@@ -366,16 +390,8 @@ def render_panel():
         reg = rgb[oy:oy + a.shape[0], ox:ox + a.shape[1]]
         reg[...] = reg * (1 - al) + a[..., :3] * al
 
-    # ---- studio lighting and photographic shine (as on the Tracker)
-    light = 1.20 - 0.30 * v ** 1.25
-    light *= 1 - 0.16 * np.abs(2 * u - 1) ** 2.4
-    light *= 1 + 0.06 * np.exp(-((u - 0.5) / 0.30) ** 2 - ((v - 0.15) / 0.35) ** 2)
-    rgb *= light[..., None]
-    g = u * 0.95 + v * 0.30
-    glare = 0.75 * np.exp(-((g - 0.60) / 0.09) ** 2) + 0.45 * np.exp(-((g - 0.18) / 0.06) ** 2)
-    glare *= 0.65 + 0.35 * (1 - v)
-    rgb += (34.0 * glare)[..., None]
-    rgb *= (1 - 0.15 * np.exp(-((u - 0.5) / 0.24) ** 2))[..., None]
+    # ---- lighting: one light over faceplate + display
+    rgb *= plate_light(u, plate_v(v, False))[..., None]
 
     # ---- outline, ear slots, rack behind
     x0, y0, x1, y1 = PANEL
@@ -384,11 +400,7 @@ def render_panel():
         panel_cov *= 1 - T.rounded_rect_mask(W, H, P(a_), P(b_), P(c_), P(d_), P((d_ - b_) / 2))
     dist = ndimage.distance_transform_edt(panel_cov > 0.5).astype(np.float32)
     edge = np.exp(-dist / P(1.4))
-    gy = ndimage.sobel(ndimage.gaussian_filter(panel_cov, P(0.8)), axis=0)
-    gx = ndimage.sobel(ndimage.gaussian_filter(panel_cov, P(0.8)), axis=1)
-    facing = np.clip(gy * 2.0 + gx * 0.6, -1, 1)
-    rgb *= (1 + 0.28 * facing * edge)[..., None]
-    rgb *= (1 - 0.12 * edge)[..., None]
+    rgb *= (1 - 0.14 * edge)[..., None]                       # same edge as the display plate
     back = np.zeros_like(rgb)
     rail = 22 + 10 * (1 - v) + 1.2 * streaks(9, 1.0)
     back[...] = np.dstack([rail, rail, rail * 1.04])
@@ -567,12 +579,8 @@ def render_window():
         def streaks(length, amp):
             n = T.box_blur_x(rng.normal(size=(WH, W)).astype(np.float32), length)
             return amp * n / n.std()
-        brushed = streaks(240, 2.0) + streaks(60, 1.4) + streaks(14, 0.7) + streaks(1350, 1.4)
-        sheen = (0.95 * np.exp(-((u - 0.22) / 0.075) ** 2) + 0.70 * np.exp(-((u - 0.47) / 0.11) ** 2)
-                 + 1.00 * np.exp(-((u - 0.76) / 0.06) ** 2) + 0.45 * np.exp(-((u - 0.93) / 0.05) ** 2))
-        sheen *= 0.55 + 0.45 * (1 - v)
-        metal = 182.0 + 44.0 * sheen + brushed * (0.75 + 1.3 * sheen)
-        rgb = np.dstack([metal * 1.000, metal * 0.990, metal * 0.968]).astype(np.float32)
+        brushed, sheen = plate_material(u, plate_v(v, True), rng)
+        rgb = plate_rgb(brushed, sheen)
 
         T.glass_window(rgb, WIN_DISPLAY)
         G = T.Legend()       # faint grid
@@ -597,9 +605,7 @@ def render_window():
         T.blend(rgb, (206, 206, 200), ndimage.gaussian_filter(G.mask(), 0.5) * 0.16)
         T.blend(rgb, (206, 206, 200), ndimage.gaussian_filter(Lb.mask(), 0.5) * 0.80)
 
-        light = (1.16 - 0.28 * v ** 1.25) * (1 - 0.16 * np.abs(2 * u - 1) ** 2.4)
-        light *= 1 - 0.15 * np.exp(-((u - 0.5) / 0.24) ** 2)
-        rgb *= light[..., None]
+        rgb *= plate_light(u, plate_v(v, True))[..., None]     # one light over both plates
         cov = T.rounded_rect_mask(W, WH, P(2), P(1), P(PW - 2), P(WIN_H - 2), P(7))
         dist = ndimage.distance_transform_edt(cov > 0.5).astype(np.float32)
         rgb *= (1 - 0.14 * np.exp(-dist / P(1.4)))[..., None]
