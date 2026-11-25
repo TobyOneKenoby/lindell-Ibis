@@ -76,8 +76,14 @@ private:
     std::vector<KnobSlot> knobs;
     std::vector<ButtonSlot> buttons;
     std::vector<ToggleSlot> toggles;
-    std::unique_ptr<ButtonAtt> ch1Att, ch2Att;
+    std::unique_ptr<ButtonAtt> ch1Att, ch2Att, linkAtt;
     FilmstripToggle* powerSwitch = nullptr;
+    FilmstripToggle* displaySwitch = nullptr;
+
+    // DISPLAY switch: shows / hides the analyser plate (saved with the plug-in state)
+    bool displayOn = true;
+    void setDisplayOn (bool on);
+    float contentH() const { return layout::panelH + (displayOn ? layout::winH : 0.0f); }
 
     bool lampOn = true;
 

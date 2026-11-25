@@ -59,17 +59,21 @@ LARGE_R = 37.0                  # gain / low cut
 SMALL_R = 23.5                  # freq / bandwidth / colour source / colour
 BUTTON_R = 15.0
 TOGGLE_R = 18.5
-LAMP = (948.0, 211.0, 29.0)     # cx, cy, bezel radius
+LAMP = (948.0, 245.0, 27.0)     # cx, cy, bezel radius
 
 CH_X = {0: dict(lc=212.0, bands=[358.0, 506.0, 652.0, 800.0]),
         1: dict(lc=1083.0, bands=[1229.0, 1376.0, 1523.0, 1671.0])}
 Y_GAIN, Y_FREQ, Y_BW = 80.0, 186.0, 313.0
 Y_LC, Y_COLSRC, Y_COLOUR = 80.0, 228.0, 313.0
 Y_STEP, Y_SHELF, Y_STEEP = 254.0, 147.0, 160.0
-TOGGLES = {"ch1": (948.0, 56.0), "ch2": (948.0, 132.0), "power": (948.0, 312.0)}
+TOGGLES = {"ch1": (948.0, 48.0), "ch2": (948.0, 112.0), "link": (948.0, 176.0),
+           "power": (948.0, 320.0), "display": (1801.0, 262.0)}
+# printed legends of each toggle: title, left position, right position
+TOGGLE_LEGENDS = {"ch1": ("CH1", "IN", "OUT"), "ch2": ("CH2", "IN", "OUT"), "link": ("STEREO LINK", "ON", "OFF"),
+                  "power": ("POWER", "ON", "OFF"), "display": ("DISPLAY", "ON", "OFF")}
 SCREWS = [(125.0, 47.0), (125.0, 323.0), (1791.0, 47.0), (1791.0, 323.0)]
 SLOTS = [(10, 16, 59, 38), (10, 332, 59, 354), (1857, 16, 1906, 38), (1857, 332, 1906, 354)]
-DIVIDERS = [287.0, 432.0, 579.0, 726.0, 875.0, 1021.0, 1157.0, 1302.0, 1449.0, 1597.0, 1745.0]
+DIVIDERS = [287.0, 432.0, 579.0, 726.0, 875.0, 1157.0, 1302.0, 1449.0, 1597.0, 1745.0]
 LOGOS = [("logo_lsr.png", 1782.0, 185.0, 22.0), ("logo_l.png", 1833.0, 185.5, None)]
 
 # Analyser display under the faceplate (its own coordinates, same width)
@@ -201,14 +205,10 @@ def misc_legends(L):
     L.text("PLUGINS", 1806.0, 160.0, 12.5, track=0.8, weight=0.12)
     # centre section
     for name, (x, y) in TOGGLES.items():
-        if name == "power":
-            L.text("POWER", x, y - 32.0, TITLE)
-            L.text("ON", x - 34.0, y, TITLE * 0.92)
-            L.text("OFF", x + 36.0, y, TITLE * 0.92)
-        else:
-            L.text(name.upper(), x, y - 28.0, TITLE)
-            L.text("IN", x - 32.0, y, TITLE * 0.92)
-            L.text("OUT", x + 37.0, y, TITLE * 0.92)
+        title, left, right = TOGGLE_LEGENDS[name]
+        L.text(title, x, y - (30.0 if name == "power" else 27.0), TITLE * (0.9 if len(title) > 8 else 1.0))
+        L.text(left, x - 32.0 - 1.5 * (len(left) - 2), y, TITLE * 0.92)
+        L.text(right, x + 36.0, y, TITLE * 0.92)
     # dividers between the sections
     for x in DIVIDERS:
         L.line(x, 14.0, x, 356.0, 1.3)

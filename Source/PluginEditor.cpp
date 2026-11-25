@@ -138,7 +138,9 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
         addAndMakeVisible (*toggle);
         if (juce::String (t.name) == "ch1") ch1Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (0), *toggle);
         if (juce::String (t.name) == "ch2") ch2Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (1), *toggle);
+        if (juce::String (t.name) == "link") linkAtt = std::make_unique<ButtonAtt> (proc.apvts, ids::link, *toggle);
         if (juce::String (t.name) == "power") powerSwitch = toggle.get();
+        if (juce::String (t.name) == "display") displaySwitch = toggle.get();
         toggles.push_back ({ &t, std::move (toggle) });
     }
 
@@ -156,18 +158,31 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
         }
     };
 
-    const float aspect = layout::panelW / (layout::panelH + layout::winH);
+    displayOn = (bool) proc.apvts.state.getProperty ("displayOn", true);
+    displaySwitch->setToggleState (displayOn, juce::dontSendNotification);
+    displaySwitch->onClick = [this] { setDisplayOn (displaySwitch->getToggleState()); };
+
     setResizable (true, false);
-    setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
-    if (auto* c = getConstrainer())
-        c->setFixedAspectRatio (aspect);
-    setSize (1440, juce::roundToInt (1440 / aspect));
+    setSize (1440, 400);
+    setDisplayOn (displayOn);
 
     timerCallback();
     startTimerHz (30);
 }
 
 HeronEQAudioProcessorEditor::~HeronEQAudioProcessorEditor() { stopTimer(); }
+
+void HeronEQAudioProcessorEditor::setDisplayOn (bool on)
+{
+    displayOn = on;
+    proc.apvts.state.setProperty ("displayOn", on, nullptr);
+    const float aspect = layout::panelW / contentH();
+    setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio (aspect);
+    setSize (getWidth(), juce::roundToInt ((float) getWidth() / aspect));
+    repaint();
+}
 
 juce::Rectangle<float> HeronEQAudioProcessorEditor::panelRect (float cx, float cy, float w, float h) const
 {
@@ -241,9 +256,12 @@ void HeronEQAudioProcessorEditor::paint (juce::Graphics& g)
     const float k = (float) getWidth() / layout::panelW;
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImage (panel, { 0.0f, 0.0f, (float) getWidth(), layout::panelH * k }, juce::RectanglePlacement::stretchToFit);
-    g.drawImage (windowImg, { 0.0f, layout::panelH * k, (float) getWidth(), layout::winH * k },
-                 juce::RectanglePlacement::stretchToFit);
-    paintDisplay (g);
+    if (displayOn)
+    {
+        g.drawImage (windowImg, { 0.0f, layout::panelH * k, (float) getWidth(), layout::winH * k },
+                     juce::RectanglePlacement::stretchToFit);
+        paintDisplay (g);
+    }
 
     const float lw = (float) layout::lampFrame / layout::assetScale;
     g.drawImage (frameOf (lampStrip, layout::lampFrame, lampOn ? 1 : 0),
@@ -274,8 +292,11 @@ void HeronEQAudioProcessorEditor::timerCallback()
     const bool power = proc.apvts.getRawParameterValue (ids::bypass)->load() < 0.5f;
     powerSwitch->setToggleState (power, juce::dontSendNotification);
 
-    updateSpectrum();
-    repaint (displayArea());
+    if (displayOn)
+    {
+        updateSpectrum();
+        repaint (displayArea());
+    }
     if (power != lampOn)
     {
         lampOn = power;

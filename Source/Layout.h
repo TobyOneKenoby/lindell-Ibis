@@ -12,7 +12,7 @@ namespace layout
     constexpr int toggleFrame = 96;
     constexpr float toggleR = 18.5f;
     constexpr int lampFrame = 200;
-    constexpr float lampX = 948.0f, lampY = 211.0f;
+    constexpr float lampX = 948.0f, lampY = 245.0f;
 
     // analyser display under the faceplate (window coordinates, same width)
     constexpr float winH = 190.0f;
@@ -95,8 +95,10 @@ namespace layout
     struct Toggle { const char* name; float x, y; };
     inline constexpr Toggle toggles[] =
     {
-        { "ch1", 948.0f, 56.0f },
-        { "ch2", 948.0f, 132.0f },
-        { "power", 948.0f, 312.0f },
+        { "ch1", 948.0f, 48.0f },
+        { "ch2", 948.0f, 112.0f },
+        { "link", 948.0f, 176.0f },
+        { "power", 948.0f, 320.0f },
+        { "display", 1801.0f, 262.0f },
     };
 }

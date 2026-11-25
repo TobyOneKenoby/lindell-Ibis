@@ -35,6 +35,8 @@ on the Crane Song IBIS discrete Class-A equaliser, with a photographic bitmap fr
 - **Two channels, like the hardware.** CH1 processes left and CH2 processes right.
   They are linked by default, so either half of the panel controls both channels.
   Right-click an empty part of the panel to unlink them (dual mono) or to copy CH1 to CH2.
+- **STEREO LINK** switch (also on the right-click menu) and a **DISPLAY** switch that
+  shows or hides the analyser under the faceplate.
 - **CH1 / CH2 IN/OUT switches** and a **POWER** switch, which is the host bypass. The
   lamp goes out when POWER is off.
 - 2× oversampling, a bypass that crossfades with no click, and automation
