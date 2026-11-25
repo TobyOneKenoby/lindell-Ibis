@@ -1,13 +1,12 @@
-# Heron EQ
+# Lindell - Ibis
 
 A dual-channel, four-band parallel equaliser plug-in (VST3 / AU / Standalone) modelled
 on the Crane Song IBIS discrete Class-A equaliser, with a photographic bitmap front panel.
 
-> **Personal use only.** The GUI is built from a photo of the Crane Song IBIS front
-> panel, including its logo. Crane Song's trademarks and artwork belong to Crane Song
-> Ltd. Do not distribute builds of this plug-in.
+> **Personal use only.** The panel carries the IBIS logo, a trademark of Crane Song Ltd.
+> Do not distribute builds of this plug-in.
 
-![Heron EQ](docs/screenshot.png)
+![Lindell - Ibis](docs/screenshot.png)
 
 ## Features
 
@@ -43,24 +42,31 @@ on the Crane Song IBIS discrete Class-A equaliser, with a photographic bitmap fr
 
 ## GUI
 
-The panel is 100% bitmap: the photo itself, with no vector drawing.
-`tools/extract_panel.py` takes the reference photo and produces:
+The panel is rendered with the Lindell Tracker 2 renderer, so the two plug-ins match:
 
-- the panel background, with the knob caps removed;
-- each knob's cap, which the plug-in rotates around its centre;
-- a pushed-in image for every push button;
-- a flipped-lever image for each toggle switch;
-- an unlit image of the power lamp.
+- a brushed-aluminium faceplate with silk-screen ink and studio lighting;
+- the Tracker's teal knobs for gain and LOW CUT;
+- fluted IBIS-style small knobs on silver nuts for frequency, bandwidth and colour;
+- push buttons, bat toggles and a power lamp.
 
-Each knob's angle range matches the scale printed on the panel. Gain and bandwidth
-use the panel's own (non-linear) markings.
-
-To use a sharper photo, run the script on it and rebuild. The seed coordinates in the
-script are for a 2000×620 photo with the same framing.
+`tools/lindell_render.py` is vendored unchanged from `lindell-tracker-2`.
+`tools/render_assets.py` adds the Ibis layout, its printed scales, the small knob and
+the push buttons. It writes `assets/*.png` and `Source/Layout.h`:
 
 ```bash
-python3 tools/extract_panel.py path/to/photo.jpg
+pip install numpy scipy pillow
 ```
+
+```bash
+python3 tools/render_assets.py
+```
+
+```bash
+python3 tools/preview.py preview.png
+```
+
+The branding (the green IBIS logo, LINDELL PLUGINS and the LSR / L logos) is set at the
+top of `tools/render_assets.py`.
 
 ## How the DSP works
 
@@ -93,11 +99,11 @@ cmake --build build --config Release --target HeronEQ_VST3 HeronEQ_AU -j8
 This builds a universal binary (Apple Silicon and Intel). To install:
 
 ```bash
-cp -R "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3" ~/Library/Audio/Plug-Ins/VST3/
+cp -R "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3" ~/Library/Audio/Plug-Ins/VST3/
 ```
 
 ```bash
-cp -R "build/HeronEQ_artefacts/Release/AU/Heron EQ.component" ~/Library/Audio/Plug-Ins/Components/
+cp -R "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component" ~/Library/Audio/Plug-Ins/Components/
 ```
 
 Or configure with `-DHERON_COPY_AFTER_BUILD=ON` to have the build copy them for you.
@@ -107,11 +113,11 @@ To open the project in Xcode instead, add `-G Xcode` to the configure command.
 ### Prebuilt binaries from GitHub Actions
 
 Each push builds, tests and packages the macOS VST3 and AU. Download them from the
-**HeronEQ-macOS** artefact on the Actions run. They are only ad-hoc signed, so remove
+**Lindell-Ibis-macOS** artefact on the Actions run. They are only ad-hoc signed, so remove
 the quarantine flag after unzipping:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Heron EQ.vst3"
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Lindell - Ibis.vst3"
 ```
 
 ## Tests
@@ -129,7 +135,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 ```bash
-build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
+build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3"
 ```
 
 - `HeronDSPTests` checks the frequency tables, the dead zone, exact

@@ -1,144 +1,90 @@
 #include "PluginEditor.h"
 #include "BinaryData.h"
 
-using namespace heron::ui;
-namespace hp = heron::panel;
-
-//==============================================================================
-juce::Image heron::ui::loadPanelImage (const char* resourceName)
+namespace
 {
-    int size = 0;
-    if (auto* data = BinaryData::getNamedResource (resourceName, size))
-        return juce::ImageCache::getFromMemory (data, size);
-    jassertfalse;
-    return {};
-}
+    juce::Image loadPng (const void* data, int size) { return juce::ImageCache::getFromMemory (data, size); }
 
-//==============================================================================
-SpriteKnob::SpriteKnob (const hp::Knob& info, float startDeg, float endDeg)
-    : sprite (loadPanelImage (info.resource)),
-      pivot (info.pivotX - (float) info.x, info.pivotY - (float) info.y),
-      photoAngle (info.photoAngleDeg), startAngle (startDeg), endAngle (endDeg),
-      radius ((float) info.size * 0.5f)
-{
-    setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    setMouseDragSensitivity (220);
-    setVelocityBasedMode (false);
-    setBufferedToImage (false);
-    setBounds (info.x, info.y, info.size, info.size);
-    setPaintingIsUnclipped (true);
-}
-
-void SpriteKnob::paint (juce::Graphics& g)
-{
-    const float t = (float) valueToProportionOfLength (getValue());
-    const float angle = startAngle + t * (endAngle - startAngle);
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImageTransformed (sprite, juce::AffineTransform::rotation (juce::degreesToRadians (angle - photoAngle), pivot.x, pivot.y));
-}
-
-bool SpriteKnob::hitTest (int x, int y)
-{
-    return pivot.getDistanceFrom ({ (float) x, (float) y }) <= radius;
-}
-
-//==============================================================================
-SpriteButton::SpriteButton (const hp::Sprite& info)
-    : juce::Button (info.name), pressed (loadPanelImage (info.resource))
-{
-    setClickingTogglesState (true);
-    setBounds (info.x, info.y, info.size, info.size);
-}
-
-void SpriteButton::paintButton (juce::Graphics& g, bool, bool)
-{
-    if (getToggleState())
-        g.drawImageAt (pressed, 0, 0);
-}
-
-bool SpriteButton::hitTest (int x, int y)
-{
-    return juce::Point<int> (x, y).getDistanceFrom (getLocalBounds().getCentre()) <= getWidth() / 2;
-}
-
-//==============================================================================
-ToggleSwitch::ToggleSwitch (const hp::Sprite& info)
-    : juce::Button (info.name), leverRight (loadPanelImage (info.resource))
-{
-    setClickingTogglesState (true);
-    setBounds (info.x, info.y, info.size, info.size);
-}
-
-void ToggleSwitch::paintButton (juce::Graphics& g, bool, bool)
-{
-    if (! getToggleState())
-        g.drawImageAt (leverRight, 0, 0);
-}
-
-//==============================================================================
-Lamp::Lamp() : off (loadPanelImage (hp::lampOff.resource))
-{
-    setInterceptsMouseClicks (false, false);
-    setBounds (hp::lampOff.x, hp::lampOff.y, hp::lampOff.size, hp::lampOff.size);
-}
-
-void Lamp::paint (juce::Graphics& g)
-{
-    if (! lit)
-        g.drawImageAt (off, 0, 0);
-}
-
-//==============================================================================
-HeronEQAudioProcessorEditor::Panel::Panel() : image (loadPanelImage ("panel_png"))
-{
-    setSize (hp::width, hp::height);
-}
-
-void HeronEQAudioProcessorEditor::Panel::paint (juce::Graphics& g)
-{
-    g.drawImageAt (image, 0, 0);
-}
-
-void HeronEQAudioProcessorEditor::Panel::mouseDown (const juce::MouseEvent& e)
-{
-    if (e.mods.isPopupMenu() && onMenu)
-        onMenu();
-}
-
-//==============================================================================
-// Rotation range of each knob type, matching the printed scale (degrees from 12 o'clock).
-static std::pair<float, float> rangeFor (hp::KnobKind k)
-{
-    switch (k)
+    juce::Image frameOf (const juce::Image& strip, int frameSize, int frame)
     {
-        case hp::KnobKind::LowCut:       return { -165.0f, 165.0f };  // OUT, 20 ... 150 (30 deg steps)
-        case hp::KnobKind::Freq:         return { -165.0f, 165.0f };  // 12 note positions (30 deg steps)
-        case hp::KnobKind::ColourSource: return { -62.0f, 38.0f };    // OFF, 1, 2, 3, 4, FULL (20 deg steps)
-        case hp::KnobKind::Colour:       return { -150.0f, 150.0f };  // 0 ... 10
-        case hp::KnobKind::Gain:         return { -148.0f, 148.0f };  // 12 ... 0 ... 12
-        case hp::KnobKind::Bandwidth:    return { -150.0f, 150.0f };  // .1 ... 4
+        return strip.getClippedImage ({ 0, frame * frameSize, frameSize, frameSize });
     }
-    return { -150.0f, 150.0f };
+
+    bool insideCircle (const juce::Component& c, int x, int y, float fraction)
+    {
+        const auto b = c.getLocalBounds().toFloat();
+        return b.getCentre().getDistanceFrom ({ (float) x, (float) y }) <= b.getWidth() * 0.5f * fraction;
+    }
 }
 
-static juce::String paramFor (hp::KnobKind k, int ch, int band)
+//==============================================================================
+FilmstripKnob::FilmstripKnob (const juce::Image& s, int fs, int nf, float a0, float a1, bool stepped)
+    : juce::Slider (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox),
+      strip (s), frameSize (fs), numFrames (nf), startDeg (a0), endDeg (a1)
+{
+    setMouseDragSensitivity (stepped ? 160 : 260);
+    setPaintingIsUnclipped (true);
+    setRotaryParameters (juce::degreesToRadians (startDeg + 360.0f), juce::degreesToRadians (endDeg + 360.0f), true);
+}
+
+void FilmstripKnob::paint (juce::Graphics& g)
+{
+    const float norm = (float) valueToProportionOfLength (getValue());
+    float ang = std::fmod (startDeg + norm * (endDeg - startDeg), 360.0f);
+    if (ang < 0) ang += 360.0f;
+    const int frame = juce::roundToInt (ang / 360.0f * (float) numFrames) % numFrames;
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (frameOf (strip, frameSize, frame), getLocalBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+}
+
+bool FilmstripKnob::hitTest (int x, int y) { return insideCircle (*this, x, y, 0.85f); }
+
+//==============================================================================
+StripButton::StripButton (const juce::Image& s, int fs) : juce::Button ({}), strip (s), frameSize (fs)
+{
+    setClickingTogglesState (true);
+}
+
+void StripButton::paintButton (juce::Graphics& g, bool, bool)
+{
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (frameOf (strip, frameSize, getToggleState() ? 1 : 0), getLocalBounds().toFloat(),
+                 juce::RectanglePlacement::stretchToFit);
+}
+
+bool StripButton::hitTest (int x, int y) { return insideCircle (*this, x, y, 0.85f); }
+
+//==============================================================================
+FilmstripToggle::FilmstripToggle (const juce::Image& s, int fs) : juce::Button ({}), strip (s), frameSize (fs)
+{
+    setClickingTogglesState (true);
+}
+
+void FilmstripToggle::paintButton (juce::Graphics& g, bool, bool)
+{
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (frameOf (strip, frameSize, getToggleState() ? 0 : 1), getLocalBounds().toFloat(),
+                 juce::RectanglePlacement::stretchToFit);
+}
+
+//==============================================================================
+static juce::String paramFor (layout::KnobKind k, int ch, int band)
 {
     switch (k)
     {
-        case hp::KnobKind::LowCut:       return ids::lowCut (ch);
-        case hp::KnobKind::ColourSource: return ids::colourSrc (ch);
-        case hp::KnobKind::Colour:       return ids::colour (ch);
-        case hp::KnobKind::Gain:         return ids::bandGain (ch, band);
-        case hp::KnobKind::Freq:         return ids::bandFreq (ch, band);
-        case hp::KnobKind::Bandwidth:    return ids::bandBw (ch, band);
+        case layout::KnobKind::LowCut:       return ids::lowCut (ch);
+        case layout::KnobKind::ColourSource: return ids::colourSrc (ch);
+        case layout::KnobKind::Colour:       return ids::colour (ch);
+        case layout::KnobKind::Gain:         return ids::bandGain (ch, band);
+        case layout::KnobKind::Freq:         return ids::bandFreq (ch, band);
+        case layout::KnobKind::Bandwidth:    return ids::bandBw (ch, band);
     }
     return {};
 }
 
 static juce::String buttonParamFor (const juce::String& name, int ch)
 {
-    // names: c1_shelf1, c1_shelf4, c1_steep, c1_step1..4
+    // names: c1_steep, c1_shelf1, c1_shelf4, c1_step1..4
     const auto what = name.fromFirstOccurrenceOf ("_", false, false);
     if (what == "steep") return ids::lowCutSteep (ch);
     if (what.startsWith ("shelf")) return ids::bandShelf (ch, what.getTrailingIntValue() - 1);
@@ -147,42 +93,53 @@ static juce::String buttonParamFor (const juce::String& name, int ch)
     return {};
 }
 
+static bool isStepped (layout::KnobKind k)
+{
+    return k == layout::KnobKind::LowCut || k == layout::KnobKind::Freq || k == layout::KnobKind::ColourSource;
+}
+
+//==============================================================================
 HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
-    addAndMakeVisible (panel);
-    panel.onMenu = [this] { showMenu(); };
+    panel       = loadPng (BinaryData::panel_png, BinaryData::panel_pngSize);
+    knobLarge   = loadPng (BinaryData::knob_large_strip_png, BinaryData::knob_large_strip_pngSize);
+    knobSmall   = loadPng (BinaryData::knob_small_strip_png, BinaryData::knob_small_strip_pngSize);
+    buttonRed   = loadPng (BinaryData::button_red_strip_png, BinaryData::button_red_strip_pngSize);
+    buttonBlack = loadPng (BinaryData::button_black_strip_png, BinaryData::button_black_strip_pngSize);
+    buttonWhite = loadPng (BinaryData::button_white_strip_png, BinaryData::button_white_strip_pngSize);
+    toggleStrip = loadPng (BinaryData::toggle_strip_png, BinaryData::toggle_strip_pngSize);
+    lampStrip   = loadPng (BinaryData::lamp_strip_png, BinaryData::lamp_strip_pngSize);
 
-    for (const auto& k : hp::knobs)
+    for (const auto& k : layout::knobs)
     {
-        const auto range = rangeFor (k.kind);
-        KnobSlot slot { &k, std::make_unique<SpriteKnob> (k, range.first, range.second), nullptr };
-        panel.addAndMakeVisible (*slot.knob);
-        knobs.push_back (std::move (slot));
+        const auto sw = layout::sweepFor (k.kind);
+        auto knob = std::make_unique<FilmstripKnob> (k.large ? knobLarge : knobSmall,
+                                                     k.large ? layout::largeKnobFrame : layout::smallKnobFrame,
+                                                     layout::knobFrames, sw.startDeg, sw.endDeg, isStepped (k.kind));
+        addAndMakeVisible (*knob);
+        knobs.push_back ({ &k, std::move (knob), nullptr });
     }
-    for (const auto& b : hp::buttons)
+    for (const auto& b : layout::buttons)
     {
-        ButtonSlot slot { b.name, std::make_unique<SpriteButton> (b), nullptr };
-        panel.addAndMakeVisible (*slot.button);
-        buttons.push_back (std::move (slot));
+        const auto& strip = b.colour == layout::ButtonColour::Red ? buttonRed
+                          : b.colour == layout::ButtonColour::Black ? buttonBlack : buttonWhite;
+        auto button = std::make_unique<StripButton> (strip, layout::buttonFrame);
+        addAndMakeVisible (*button);
+        buttons.push_back ({ &b, std::move (button), nullptr });
     }
-    for (const auto& t : hp::toggles)
+    for (const auto& t : layout::toggles)
     {
-        auto sw = std::make_unique<ToggleSwitch> (t);
-        panel.addAndMakeVisible (*sw);
-        const juce::String n (t.name);
-        if (n == "ch1") ch1Switch = std::move (sw);
-        else if (n == "ch2") ch2Switch = std::move (sw);
-        else powerSwitch = std::move (sw);
+        auto toggle = std::make_unique<FilmstripToggle> (toggleStrip, layout::toggleFrame);
+        addAndMakeVisible (*toggle);
+        if (juce::String (t.name) == "ch1") ch1Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (0), *toggle);
+        if (juce::String (t.name) == "ch2") ch2Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (1), *toggle);
+        if (juce::String (t.name) == "power") powerSwitch = toggle.get();
+        toggles.push_back ({ &t, std::move (toggle) });
     }
-    panel.addAndMakeVisible (lamp);
 
     attachChannel (0, 0);
     attachChannel (1, proc.apvts.getRawParameterValue (ids::link)->load() > 0.5f ? 0 : 1);
-
-    // Channel IN/OUT switches stay per channel even when the controls are linked.
-    ch1Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (0), *ch1Switch);
-    ch2Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (1), *ch2Switch);
 
     // POWER is the inverse of the host bypass parameter.
     powerSwitch->onClick = [this]
@@ -195,10 +152,12 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
         }
     };
 
-    setResizable (true, true);
-    setResizeLimits (hp::width / 2, hp::height / 2, hp::width * 5 / 4, hp::height * 5 / 4);
-    getConstrainer()->setFixedAspectRatio ((double) hp::width / hp::height);
-    setSize (hp::width * 3 / 4, hp::height * 3 / 4);
+    const float aspect = layout::panelW / layout::panelH;
+    setResizable (true, false);
+    setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio (aspect);
+    setSize (1440, juce::roundToInt (1440 / aspect));
 
     timerCallback();
     startTimerHz (20);
@@ -206,12 +165,18 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
 
 HeronEQAudioProcessorEditor::~HeronEQAudioProcessorEditor() { stopTimer(); }
 
-// Binds one half of the panel (panelChannel) to the parameters of paramChannel.
-// When linked, the CH2 half is bound to CH1's parameters, so both halves move together.
+juce::Rectangle<float> HeronEQAudioProcessorEditor::panelRect (float cx, float cy, float w, float h) const
+{
+    const float k = (float) getWidth() / layout::panelW;
+    return { (cx - w * 0.5f) * k, (cy - h * 0.5f) * k, w * k, h * k };
+}
+
+// Binds one half of the panel to a channel's parameters. When linked, the CH2
+// half is bound to CH1's parameters, so both halves move together.
 void HeronEQAudioProcessorEditor::attachChannel (int panelChannel, int paramChannel)
 {
     for (auto& k : knobs)
-        if (k.info->channel - 1 == panelChannel)
+        if (k.info->channel == panelChannel)
         {
             k.att.reset();
             const auto id = paramFor (k.info->kind, paramChannel, k.info->band - 1);
@@ -221,13 +186,19 @@ void HeronEQAudioProcessorEditor::attachChannel (int panelChannel, int paramChan
         }
 
     for (auto& b : buttons)
-        if (b.name.startsWith ("c" + juce::String (panelChannel + 1)))
+        if (juce::String (b.info->name).startsWith ("c" + juce::String (panelChannel + 1)))
         {
             b.att.reset();
-            b.att = std::make_unique<ButtonAtt> (proc.apvts, buttonParamFor (b.name, paramChannel), *b.button);
+            b.att = std::make_unique<ButtonAtt> (proc.apvts, buttonParamFor (b.info->name, paramChannel), *b.button);
         }
 
     if (panelChannel == 1) boundChannel2 = paramChannel;
+}
+
+void HeronEQAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        showMenu();
 }
 
 void HeronEQAudioProcessorEditor::showMenu()
@@ -261,11 +232,29 @@ void HeronEQAudioProcessorEditor::showMenu()
     });
 }
 
-void HeronEQAudioProcessorEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
+void HeronEQAudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (panel, getLocalBounds().toFloat(), juce::RectanglePlacement::stretchToFit);
+
+    const float lw = (float) layout::lampFrame / layout::assetScale;
+    g.drawImage (frameOf (lampStrip, layout::lampFrame, lampOn ? 1 : 0),
+                 panelRect (layout::lampX, layout::lampY, lw, lw), juce::RectanglePlacement::stretchToFit);
+}
 
 void HeronEQAudioProcessorEditor::resized()
 {
-    panel.setTransform (juce::AffineTransform::scale ((float) getWidth() / (float) hp::width));
+    auto place = [this] (juce::Component& c, float cx, float cy, int frame)
+    {
+        const float d = (float) frame / layout::assetScale;
+        c.setBounds (panelRect (cx, cy, d, d).toNearestInt());
+    };
+    for (auto& k : knobs)
+        place (*k.knob, k.info->x, k.info->y, k.info->large ? layout::largeKnobFrame : layout::smallKnobFrame);
+    for (auto& b : buttons)
+        place (*b.button, b.info->x, b.info->y, layout::buttonFrame);
+    for (auto& t : toggles)
+        place (*t.toggle, t.info->x, t.info->y, layout::toggleFrame);
 }
 
 void HeronEQAudioProcessorEditor::timerCallback()
@@ -276,5 +265,10 @@ void HeronEQAudioProcessorEditor::timerCallback()
 
     const bool power = proc.apvts.getRawParameterValue (ids::bypass)->load() < 0.5f;
     powerSwitch->setToggleState (power, juce::dontSendNotification);
-    lamp.setLit (power);
+    if (power != lampOn)
+    {
+        lampOn = power;
+        const float lw = (float) layout::lampFrame / layout::assetScale;
+        repaint (panelRect (layout::lampX, layout::lampY, lw, lw).toNearestInt().expanded (2));
+    }
 }

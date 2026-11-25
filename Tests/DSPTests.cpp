@@ -1,4 +1,4 @@
-// Standalone tests for the Heron EQ DSP core (no JUCE needed).
+// Standalone tests for the Lindell - Ibis DSP core (no JUCE needed).
 // Build: c++ -std=c++17 -O2 -I../Source DSPTests.cpp -o dsp_tests && ./dsp_tests
 
 #include "HeronDSP.h"

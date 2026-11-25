@@ -22,33 +22,33 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Host test (loads the VST3 like a DAW)
-        run: build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
+        run: build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3"
 
       - name: Check universal binary
-        run: lipo -info "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3/Contents/MacOS/Heron EQ"
+        run: lipo -info "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3/Contents/MacOS/Lindell - Ibis"
 
       - name: Ad-hoc sign
         run: |
-          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
-          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/AU/Heron EQ.component"
+          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3"
+          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component"
 
       - name: auval
         continue-on-error: true
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
-          cp -R "build/HeronEQ_artefacts/Release/AU/Heron EQ.component" ~/Library/Audio/Plug-Ins/Components/
+          cp -R "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
-          auval -v aufx Hreq Hern
+          auval -v aufx Ibis Lndl
 
       - name: Package
         run: |
           mkdir -p dist
-          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3" "dist/HeronEQ-VST3-macOS.zip"
-          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/AU/Heron EQ.component" "dist/HeronEQ-AU-macOS.zip"
+          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3" "dist/Lindell-Ibis-VST3-macOS.zip"
+          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component" "dist/Lindell-Ibis-AU-macOS.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HeronEQ-macOS
+          name: Lindell-Ibis-macOS
           path: dist/*.zip
 
   linux:
@@ -65,4 +65,4 @@ jobs:
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHERON_BUILD_HOST_TEST=ON
       - run: cmake --build build --target HeronEQ_VST3 HeronDSPTests HeronHostTest -j4
       - run: ctest --test-dir build --output-on-failure
-      - run: xvfb-run -a build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Heron EQ.vst3"
+      - run: xvfb-run -a build/HeronHostTest_artefacts/Release/HeronHostTest "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3"

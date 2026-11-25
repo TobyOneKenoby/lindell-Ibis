@@ -1,5 +1,5 @@
-// HostTest: loads the built Heron EQ VST3 the way a DAW would, then checks it.
-//   HeronHostTest "<path to Heron EQ.vst3>"
+// HostTest: loads the built Lindell - Ibis VST3 the way a DAW would, then checks it.
+//   HeronHostTest "<path to Lindell - Ibis.vst3>"
 // Needs a display for the editor check (use xvfb-run on headless Linux).
 
 #include <juce_audio_processors/juce_audio_processors.h>

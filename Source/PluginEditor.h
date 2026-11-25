@@ -2,57 +2,46 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
-#include "PanelLayout.h"
+#include "Layout.h"
 
-namespace heron::ui
+/** A rotary control drawn from a pre-rendered filmstrip covering 360 degrees. */
+class FilmstripKnob : public juce::Slider
 {
-    juce::Image loadPanelImage (const char* resourceName);
+public:
+    FilmstripKnob (const juce::Image& strip, int frameSize, int numFrames, float startDeg, float endDeg, bool stepped);
+    void paint (juce::Graphics&) override;
+    bool hitTest (int x, int y) override;
 
-    // A knob drawn by rotating its photographed cap around its centre.
-    class SpriteKnob : public juce::Slider
-    {
-    public:
-        SpriteKnob (const heron::panel::Knob& info, float startDeg, float endDeg);
-        void paint (juce::Graphics&) override;
-        bool hitTest (int x, int y) override;
-    private:
-        juce::Image sprite;
-        juce::Point<float> pivot;
-        float photoAngle, startAngle, endAngle, radius;
-    };
+private:
+    juce::Image strip;
+    int frameSize, numFrames;
+    float startDeg, endDeg;
+};
 
-    // A latching push button. Released = the panel photo; pressed = a sunk-in bitmap.
-    class SpriteButton : public juce::Button
-    {
-    public:
-        explicit SpriteButton (const heron::panel::Sprite& info);
-        void paintButton (juce::Graphics&, bool, bool) override;
-        bool hitTest (int x, int y) override;
-    private:
-        juce::Image pressed;
-    };
+/** Latching push button from a 2-frame strip: frame 0 = out, frame 1 = pushed in. */
+class StripButton : public juce::Button
+{
+public:
+    StripButton (const juce::Image& strip, int frameSize);
+    void paintButton (juce::Graphics&, bool, bool) override;
+    bool hitTest (int x, int y) override;
 
-    // A bat-handle toggle. ON = lever left (as photographed), OFF = lever right.
-    class ToggleSwitch : public juce::Button
-    {
-    public:
-        explicit ToggleSwitch (const heron::panel::Sprite& info);
-        void paintButton (juce::Graphics&, bool, bool) override;
-    private:
-        juce::Image leverRight;
-    };
+private:
+    juce::Image strip;
+    int frameSize;
+};
 
-    class Lamp : public juce::Component
-    {
-    public:
-        Lamp();
-        void setLit (bool shouldBeLit) { if (lit != shouldBeLit) { lit = shouldBeLit; repaint(); } }
-        void paint (juce::Graphics&) override;
-    private:
-        juce::Image off;
-        bool lit = true;
-    };
-}
+/** Bat toggle seen head-on: frame 0 = lever left (IN / ON), frame 1 = lever right. */
+class FilmstripToggle : public juce::Button
+{
+public:
+    FilmstripToggle (const juce::Image& strip, int frameSize);
+    void paintButton (juce::Graphics&, bool, bool) override;
+
+private:
+    juce::Image strip;
+    int frameSize;
+};
 
 class HeronEQAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -62,35 +51,30 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
 
 private:
     void timerCallback() override;
     void attachChannel (int panelChannel, int paramChannel);
     void showMenu();
+    juce::Rectangle<float> panelRect (float cx, float cy, float w, float h) const;
 
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     HeronEQAudioProcessor& proc;
+    juce::Image panel, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
 
-    struct Panel : juce::Component
-    {
-        Panel();
-        void paint (juce::Graphics&) override;
-        void mouseDown (const juce::MouseEvent&) override;
-        juce::Image image;
-        std::function<void()> onMenu;
-    } panel;
-
-    struct KnobSlot { const heron::panel::Knob* info; std::unique_ptr<heron::ui::SpriteKnob> knob; std::unique_ptr<SliderAtt> att; };
-    struct ButtonSlot { juce::String name; std::unique_ptr<heron::ui::SpriteButton> button; std::unique_ptr<ButtonAtt> att; };
+    struct KnobSlot { const layout::Knob* info; std::unique_ptr<FilmstripKnob> knob; std::unique_ptr<SliderAtt> att; };
+    struct ButtonSlot { const layout::Button* info; std::unique_ptr<StripButton> button; std::unique_ptr<ButtonAtt> att; };
+    struct ToggleSlot { const layout::Toggle* info; std::unique_ptr<FilmstripToggle> toggle; };
     std::vector<KnobSlot> knobs;
     std::vector<ButtonSlot> buttons;
-
-    std::unique_ptr<heron::ui::ToggleSwitch> ch1Switch, ch2Switch, powerSwitch;
+    std::vector<ToggleSlot> toggles;
     std::unique_ptr<ButtonAtt> ch1Att, ch2Att;
-    heron::ui::Lamp lamp;
+    FilmstripToggle* powerSwitch = nullptr;
 
+    bool lampOn = true;
     int boundChannel2 = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HeronEQAudioProcessorEditor)
