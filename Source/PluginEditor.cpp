@@ -259,7 +259,7 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     displaySwitch->onClick = [this] { setDisplayOn (displaySwitch->getToggleState()); };
 
     setResizable (true, false);
-    setSize ((int) proc.apvts.state.getProperty ("editorWidth", 1440), 400);   // the size is saved with the session
+    setSize ((int) proc.apvts.state.getProperty ("editorWidth", 1500), 400);   // the size is saved with the session
     setDisplayOn (displayOn);
 
     timerCallback();
@@ -286,7 +286,7 @@ void HeronEQAudioProcessorEditor::applyWindowSize (int width)
     auto* c = getConstrainer();
     if (c != nullptr)
         c->setFixedAspectRatio (0.0);
-    const int w = juce::jlimit (1000, 3000, width > 0 ? width : 1440);
+    const int w = juce::jlimit (1000, 3000, width > 0 ? width : 1500);
     setSize (w, juce::roundToInt ((float) w / aspect));
     setResizeLimits (1000, juce::roundToInt (1000 / aspect), 3000, juce::roundToInt (3000 / aspect));
     if ((c = getConstrainer()) != nullptr)
@@ -336,7 +336,7 @@ void HeronEQAudioProcessorEditor::showMenu()
 
     // Size: Pro Tools (AAX) has no resize corner, so the plug-in resizes itself
     juce::PopupMenu sizes;
-    const int current = juce::roundToInt (100.0f * (float) getWidth() / 1440.0f);
+    const int current = juce::roundToInt (100.0f * (float) getWidth() / 1500.0f);
     for (int pct : { 70, 85, 100, 125, 150, 200 })
         sizes.addItem (1000 + pct, juce::String (pct) + " %", true, std::abs (current - pct) <= 2);
 
@@ -355,7 +355,7 @@ void HeronEQAudioProcessorEditor::showMenu()
         if (r > 2000)
             proc.setOversampling (r - 2000);
         else if (r > 1000)
-            applyWindowSize (juce::roundToInt (1440.0f * (float) (r - 1000) / 100.0f));
+            applyWindowSize (juce::roundToInt (1500.0f * (float) (r - 1000) / 100.0f));
         else if (r == 1)
         {
             linkParam->beginChangeGesture();

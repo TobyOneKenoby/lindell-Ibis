@@ -8,7 +8,8 @@ faceplate and silk-screen ink, the studio lighting and camera finish, the teal
 knobs, bat toggles, power lamp, hole plugs and logos. This file only adds the
 Ibis layout, its printed scales, and the push buttons.
 
-Coordinates are panel units of a 2U front panel (1916 x 370). Assets are
+Coordinates are panel units of a 2U front panel (2000 x 370, the same 19-inch 2U
+proportions as Lindell STC-8; Tracker 2 is the 1U, 2000 x 196). Assets are
 rendered at SCALE x that, so the background is 3832 x 740 px (sharp on retina
 screens at the default 1440 px editor width).
 
@@ -42,7 +43,7 @@ os.makedirs(OUT, exist_ok=True)
 # Branding (edit freely)
 # --------------------------------------------------------------------------
 LOGO_IMAGE = "ibis_logo.png"          # the IBIS logo, printed in green ink
-LOGO_BOX = (15.0, 100.0, 129.0, 190.0)  # x0, y0, x1, y1 panel units
+LOGO_BOX = (15.0 + 42.0, 100.0, 129.0 + 42.0, 190.0)   # (+ OFF: the wider rack ear)  # x0, y0, x1, y1 panel units
 LOGO_INK = (22, 72, 58)
 SUBTITLE = ["DISCRETE", "CLASS A", "EQUALIZER"]
 BRAND = "LINDELL PLUGINS"
@@ -51,36 +52,39 @@ BRAND = "LINDELL PLUGINS"
 # Panel geometry (panel units)
 # --------------------------------------------------------------------------
 SCALE = 3                       # 3x the panel units: sharp on retina, also when enlarged
-PW, PH = 1916, 370
+PW, PH = 2000, 370
+# The panel was first drawn 1916 wide. For a true 19-inch 2U face (as STC-8) the rack
+# ears grew: everything on the face moved OFF to the right, the right ear 2 * OFF.
+OFF = 42.0
 W, H = PW * SCALE, PH * SCALE
-PANEL = (2, 2, 1914, 368)
+PANEL = (2, 2, 1998, 368)
 
 LARGE_R = 37.0                  # gain / low cut
 SMALL_R = 23.5                  # freq / bandwidth / colour source / colour
 BUTTON_R = 12.0                 # push buttons (and the former toggles), each with a green LED ring
 TOGGLE_R = 18.5
-LAMP = (948.0, 245.0, 27.0)     # cx, cy, bezel radius
+LAMP = (948.0 + OFF, 245.0, 27.0)     # cx, cy, bezel radius
 
-CH_X = {0: dict(lc=212.0, bands=[358.0, 506.0, 652.0, 800.0]),
-        1: dict(lc=1083.0, bands=[1229.0, 1376.0, 1523.0, 1671.0])}
+CH_X = {0: dict(lc=212.0 + OFF, bands=[358.0 + OFF, 506.0 + OFF, 652.0 + OFF, 800.0 + OFF]),
+        1: dict(lc=1083.0 + OFF, bands=[1229.0 + OFF, 1376.0 + OFF, 1523.0 + OFF, 1671.0 + OFF])}
 Y_GAIN, Y_FREQ, Y_BW = 80.0, 186.0, 313.0
 Y_LC, Y_COLSRC, Y_COLOUR = 80.0, 228.0, 313.0
 Y_STEP, Y_SHELF, Y_STEEP = 254.0, 147.0, 160.0
 # the switches are round black push buttons with the green LED ring (lit = the left legend)
-TOGGLES = {"ch1": (948.0, 48.0), "ch2": (948.0, 112.0), "link": (948.0, 176.0),
-           "power": (948.0, 320.0), "display": (1801.0, 262.0)}
+TOGGLES = {"ch1": (948.0 + OFF, 48.0), "ch2": (948.0 + OFF, 112.0), "link": (948.0 + OFF, 176.0),
+           "power": (948.0 + OFF, 320.0), "display": (1791.0 + 2 * OFF, 262.0)}   # DISPLAY on the line of the screw under it (as on STC-8)
 # printed legends of each toggle: title, left position, right position
 TOGGLE_LEGENDS = {"ch1": ("CH1", "IN", "OUT"), "ch2": ("CH2", "IN", "OUT"), "link": ("STEREO LINK", "ON", "OFF"),
                   "power": ("POWER", "ON", "OFF"), "display": ("DISPLAY", "ON", "OFF")}
-SCREWS = [(125.0, 47.0), (125.0, 323.0), (1791.0, 47.0), (1791.0, 323.0)]
-SLOTS = [(10, 16, 59, 38), (10, 332, 59, 354), (1857, 16, 1906, 38), (1857, 332, 1906, 354)]
-DIVIDERS = [287.0, 432.0, 579.0, 726.0, 875.0, 1157.0, 1302.0, 1449.0, 1597.0, 1745.0]
-LOGOS = [("logo_lsr.png", 1782.0, 185.0, 22.0), ("logo_l.png", 1833.0, 185.5, None)]
+SCREWS = [(125.0, 47.0), (125.0, 323.0), (1791.0 + 2 * OFF, 47.0), (1791.0 + 2 * OFF, 323.0)]
+SLOTS = [(10, 16, 59, 38), (10, 332, 59, 354), (1941, 16, 1990, 38), (1941, 332, 1990, 354)]
+DIVIDERS = [x + OFF for x in (287.0, 432.0, 579.0, 726.0, 875.0, 1157.0, 1302.0, 1449.0, 1597.0, 1745.0)]
+LOGOS = [("logo_lsr.png", 1782.0 + OFF, 185.0, 22.0), ("logo_l.png", 1833.0 + OFF, 185.5, None)]
 
 # Analyser display under the faceplate (its own coordinates, same width)
 WIN_H = 190
-WIN_DISPLAY = (30.0, 10.0, 1886.0, 180.0)       # glass window
-SPEC = (84.0, 24.0, 1832.0, 150.0)              # plot area inside the glass
+WIN_DISPLAY = (30.0, 10.0, 1970.0, 180.0)       # glass window (full width, as on STC-8)
+SPEC = (84.0, 24.0, 1916.0, 150.0)              # plot area inside the glass
 SPEC_DB = 72.0                                  # spectrum: 0 .. -72 dBFS (left scale)
 EQ_DB = 18.0                                    # EQ curve: +18 .. -18 dB (right scale), same grid lines
 
@@ -224,10 +228,10 @@ def scale_small(L, cx, cy, labels, kind, cap=SMALL, r_text=None):
 def misc_legends(L):
     # logo + subtitle on the left
     for i, s in enumerate(SUBTITLE):
-        L.text(s, 20.0, 212.0 + i * 24.0, 13.0, align="l", weight=0.10)
+        L.text(s, 20.0 + OFF, 212.0 + i * 24.0, 13.0, align="l", weight=0.10)
     # brand on the right
-    L.text("LINDELL", 1806.0, 142.0, 12.5, track=0.8, weight=0.12)
-    L.text("PLUGINS", 1806.0, 160.0, 12.5, track=0.8, weight=0.12)
+    L.text("LINDELL", 1806.0 + OFF, 142.0, 12.5, track=0.8, weight=0.12)
+    L.text("PLUGINS", 1806.0 + OFF, 160.0, 12.5, track=0.8, weight=0.12)
     # centre section
     for name, (x, y) in TOGGLES.items():
         title, left, right = TOGGLE_LEGENDS[name]
