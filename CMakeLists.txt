@@ -25,7 +25,7 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 
 if(APPLE)
-    set(HERON_FORMATS VST3 AU Standalone)
+    set(HERON_FORMATS VST3 AU AAX Standalone)
 else()
     set(HERON_FORMATS VST3 Standalone)
 endif()
@@ -44,7 +44,8 @@ juce_add_plugin(HeronEQ
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     ${HERON_COPY_AFTER_BUILD}
     VST3_CATEGORIES             Fx EQ
-    AU_MAIN_TYPE                kAudioUnitType_Effect)
+    AU_MAIN_TYPE                kAudioUnitType_Effect
+    AAX_CATEGORY                EQ)
 
 # GUI bitmaps (rendered by tools/render_assets.py)
 juce_add_binary_data(HeronAssets HEADER_NAME BinaryData.h NAMESPACE BinaryData SOURCES
@@ -55,6 +56,7 @@ juce_add_binary_data(HeronAssets HEADER_NAME BinaryData.h NAMESPACE BinaryData S
     assets/button_red_strip.png
     assets/button_black_strip.png
     assets/button_white_strip.png
+    assets/button_ring_strip.png
     assets/toggle_strip.png
     assets/lamp_strip.png)
 

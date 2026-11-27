@@ -49,6 +49,9 @@ public:
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
 
+    /** OVERSAMPLING 2 / 4 / 8 / 16 x (at 44.1 / 48 kHz; saved with the session) */
+    int getOversampling() const;
+    void setOversampling (int factor);
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
@@ -70,7 +73,9 @@ public:
     std::atomic<int> anaWrite { 0 };
 
 private:
-    static constexpr int oversamplingOrder = 1; // 2x
+    int oversamplingOrder = 1;                  // 2x at 44.1 / 48 kHz by default
+    int preparedBlockSize = 512;
+    int osLog2For (double sampleRate) const;
     static constexpr int chunk = 16;            // coefficient update interval (oversampled samples)
 
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;

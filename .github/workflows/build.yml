@@ -16,7 +16,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHERON_BUILD_HOST_TEST=ON
 
       - name: Build
-        run: cmake --build build --config Release --target HeronEQ_VST3 HeronEQ_AU HeronDSPTests HeronHostTest -j3
+        run: cmake --build build --config Release --target HeronEQ_VST3 HeronEQ_AU HeronEQ_AAX HeronDSPTests HeronHostTest -j3
 
       - name: DSP tests
         run: ctest --test-dir build --output-on-failure
@@ -31,6 +31,7 @@ jobs:
         run: |
           codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3"
           codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component"
+          codesign --force --deep --sign - "build/HeronEQ_artefacts/Release/AAX/Lindell - Ibis.aaxplugin"
 
       - name: auval
         continue-on-error: true
@@ -45,6 +46,8 @@ jobs:
           mkdir -p dist
           ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/VST3/Lindell - Ibis.vst3" "dist/Lindell-Ibis-VST3-macOS.zip"
           ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/AU/Lindell - Ibis.component" "dist/Lindell-Ibis-AU-macOS.zip"
+          # AAX: unsigned (loads in the Pro Tools Developer build); PACE-sign it with wraptool for regular Pro Tools
+          ditto -c -k --keepParent "build/HeronEQ_artefacts/Release/AAX/Lindell - Ibis.aaxplugin" "dist/Lindell-Ibis-AAX-macOS-unsigned.zip"
 
       - uses: actions/upload-artifact@v4
         with:
