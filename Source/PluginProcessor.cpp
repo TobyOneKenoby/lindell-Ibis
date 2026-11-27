@@ -160,6 +160,14 @@ void HeronEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     osRate = sampleRate * (1 << oversamplingOrder);
     channels.assign ((size_t) numCh, ChannelEQ {});
     for (auto& c : channels) c.prepare (osRate);
+    // L / R: two hand-built channels never match exactly. Small fixed tolerances on the
+    // right channel (frequencies +1.2 %, Q -3 %, gain +2 %) and a slightly different
+    // top-end phase on each side give a touch of stereo width; mono is untouched.
+    if (channels.size() > 1)
+    {
+        channels[0].setTolerance (1.0,   1.0,  1.0,  7000.0);
+        channels[1].setTolerance (1.012, 0.97, 1.02, 7900.0);
+    }
     firstBlock = true;
 }
 
@@ -254,7 +262,13 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
                 auto& k = bc[b];
                 k.fc = bs.fc;
-                if (bs.shelf) { k.mode = b == 0 ? SVF::Mode::LowPass : SVF::Mode::HighPass; k.q = bandwidthToShelfQ (bs.bw); }
+                if (bs.shelf && b == 3)
+                {
+                    // HIGH SHELF: a true shelving filter in series (no dip, no overshoot)
+                    k.highShelf = true; k.shelfDb = bs.gain; k.q = bandwidthToHighShelfQ (bs.bw);
+                    continue;
+                }
+                if (bs.shelf) { k.mode = SVF::Mode::LowPass; k.q = bandwidthToShelfQ (bs.bw); }
                 else          { k.mode = SVF::Mode::BandPass; k.q = bandwidthToQ (bs.bw); }
                 const double A = std::pow (10.0, bs.gain / 20.0);
                 k.k = bs.gain > 0 ? A - 1.0 : 0.0;

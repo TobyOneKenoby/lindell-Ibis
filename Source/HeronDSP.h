@@ -110,6 +110,60 @@ inline double bandwidthToShelfQ (double octaves) noexcept
     return 1.1 * std::pow (0.4 / 1.1, t); // 0.2 oct -> 1.1, 4 oct -> 0.4
 }
 
+// The HIGH shelf is a true shelving filter (below). Its BANDWIDTH sets how gentle
+// the shelf is: narrow = Q 0.707 (the steepest shelf without overshoot, ~12 dB/oct
+// at its middle), wide = Q 0.4 (a long, gentle rise). Never above 0.707: a bump.
+inline double bandwidthToHighShelfQ (double octaves) noexcept
+{
+    const double t = std::clamp ((std::log2 (octaves) - std::log2 (0.2)) / (std::log2 (4.0) - std::log2 (0.2)), 0.0, 1.0);
+    return 0.70710678 * std::pow (0.4 / 0.70710678, t);
+}
+
+//==============================================================================
+// High shelf: Simper's trapezoidal SVF shelf. Flat (0 dB) below, the set gain
+// above, the half-gain point at fc; no dip below the corner, no overshoot
+// (Q <= 0.707). Replaces "1 + k * 2nd-order high-pass", which cancelled itself
+// below the corner (up to -5.7 dB an octave under a +12 dB shelf) and overshot.
+//==============================================================================
+struct HighShelf
+{
+    double a1 = 1, a2 = 0, a3 = 0, m0 = 1, m1 = 0, m2 = 0, ic1 = 0, ic2 = 0;
+    bool active = false;
+
+    void setup (double fc, double q, double gainDb, double sampleRate) noexcept
+    {
+        active = std::abs (gainDb) > 1.0e-4;
+        const double A = std::pow (10.0, gainDb / 40.0);
+        fc = std::clamp (fc, 5.0, sampleRate * 0.49);
+        const double g = std::tan (3.14159265358979323846 * fc / sampleRate) * std::sqrt (A);
+        const double k = 1.0 / q;
+        a1 = 1.0 / (1.0 + g * (g + k)); a2 = g * a1; a3 = g * a2;
+        m0 = A * A; m1 = k * (1.0 - A) * A; m2 = 1.0 - A * A;
+    }
+    void reset() noexcept { ic1 = ic2 = 0; }
+    double process (double v0) noexcept
+    {
+        const double v3 = v0 - ic2;
+        const double v1 = a1 * ic1 + a2 * v3;
+        const double v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2.0 * v1 - ic1; ic2 = 2.0 * v2 - ic2;
+        return m0 * v0 + m1 * v1 + m2 * v2;
+    }
+    /** analog magnitude at hz (for the on-screen curve) */
+    static double magnitude (double hz, double fc, double q, double gainDb) noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0), k = 1.0 / q;
+        const double w = hz / (fc * std::sqrt (A));
+        // H = m0 + m1 * s / D + m2 / D,  D = s^2 + k s + 1,  s = j w
+        const double dr = 1.0 - w * w, di = k * w, dd = dr * dr + di * di;
+        const double bpr = w * di / dd, bpi = w * dr / dd;        // s / D
+        const double lpr = dr / dd, lpi = -di / dd;               // 1 / D
+        const double re = A * A + k * (1.0 - A) * A * bpr + (1.0 - A * A) * lpr;
+        const double im = k * (1.0 - A) * A * bpi + (1.0 - A * A) * lpi;
+        return std::sqrt (re * re + im * im);
+    }
+};
+
 //==============================================================================
 // TPT state-variable filter (Simper) exposing its outputs as affine functions
 // of the current input, so a delay-free feedback loop can be solved exactly.
@@ -258,23 +312,38 @@ public:
         for (auto& b : ff) b.reset();
         for (auto& b : fb) b.reset();
         lowCut.reset();
-        dcX = dcY = 0;
+        hshelf.reset();
+        dcX = dcY = 0; apZ = 0;
     }
 
     // Per-band smoothed values, so automation is zipper-free. The caller
     // supplies already-smoothed values through `update`.
-    struct BandCoeffs { double fc = 1000, q = 1, k = 0, m = 0; SVF::Mode mode = SVF::Mode::BandPass; };
+    struct BandCoeffs { double fc = 1000, q = 1, k = 0, m = 0; SVF::Mode mode = SVF::Mode::BandPass;
+                        bool highShelf = false; double shelfDb = 0.0; };   // band 4 SHELF: series shelf filter
+
+    /** analog component tolerances of this channel (two hand-built channels never match):
+        frequency, Q and gain multipliers, and a first-order all-pass corner (phase only) */
+    void setTolerance (double freqMul, double qMul, double gainMul, double allpassHz) noexcept
+    {
+        tolF = freqMul; tolQ = qMul; tolG = gainMul; apHz = allpassHz;
+        if (apHz > 0.0) { const double t = std::tan (kPi * std::min (apHz, 0.45 * sr) / sr); apA = (t - 1.0) / (t + 1.0); }
+    }
 
     void update (const std::array<BandCoeffs, 4>& bc, double lowCutHz, bool steep,
                  ColourSource src, double colour01) noexcept
     {
+        auto tolGain = [this] (double km) { return km > 0.0 ? std::pow (1.0 + km, tolG) - 1.0 : 0.0; };   // gain in dB * tolG
         for (size_t i = 0; i < 4; ++i)
         {
-            ff[i].setup (bc[i].fc, bc[i].q, sr, bc[i].mode);
-            fb[i].setup (bc[i].fc, bc[i].q, sr, bc[i].mode);
-            kBoost[i] = bc[i].k;
-            mCut[i] = bc[i].m;
+            const double fc = bc[i].fc * tolF;
+            ff[i].setup (fc, bc[i].q * tolQ, sr, bc[i].mode);
+            fb[i].setup (fc, bc[i].q * tolQ, sr, bc[i].mode);
+            kBoost[i] = bc[i].highShelf ? 0.0 : tolGain (bc[i].k);
+            mCut[i]   = bc[i].highShelf ? 0.0 : tolGain (bc[i].m);
         }
+        shelfOn = bc[3].highShelf;
+        shelfDb = bc[3].shelfDb * tolG;
+        if (shelfOn) hshelf.setup (bc[3].fc * tolF, bc[3].q * tolQ, shelfDb, sr);
         if (lowCutHz != lastLowCutHz || steep != lastSteep)
         {
             lowCut.setup (lowCutHz, steep, sr);
@@ -323,14 +392,34 @@ public:
             fb[i].tick (y);
         }
 
+        // HIGH SHELF (band 4 with SHELF in): a true shelving filter, in series
+        double yOut = y;
+        if (shelfOn && hshelf.active)
+        {
+            yOut = hshelf.process (y);
+            if (colourBand == 3)
+            {
+                const double kk = std::pow (10.0, shelfDb / 20.0) - 1.0;   // the shelf's added (or removed) part
+                if (std::abs (kk) > 1.0e-6) harm += kk * harmonics ((yOut - y) / kk, colourAmt);
+            }
+        }
+        else if (shelfOn) hshelf.process (y);                          // keep its state running
+
         if (colourSrc == ColourSource::Full)
-            harm += harmonics (y, colourAmt);
+            harm += harmonics (yOut, colourAmt);
 
         // DC-block only the harmonic signal, so the clean path stays untouched.
         const double h = harm - dcX + dcR * dcY;
         dcX = harm; dcY = h;
 
-        return y + h;
+        double out = yOut + h;
+        if (apHz > 0.0)                                                // channel tolerance: phase only
+        {
+            const double a = apA * out + apZ;
+            apZ = out - apA * a;
+            out = a;
+        }
+        return out;
     }
 
 private:
@@ -342,6 +431,8 @@ private:
     ColourSource colourSrc = ColourSource::Off;
     double colourAmt = 0.0;
     double dcR = 0.999, dcX = 0, dcY = 0;
+    HighShelf hshelf; bool shelfOn = false; double shelfDb = 0.0;
+    double tolF = 1.0, tolQ = 1.0, tolG = 1.0, apHz = 0.0, apA = 0.0, apZ = 0.0;
 };
 
 //==============================================================================
@@ -352,9 +443,16 @@ inline ChannelEQ::BandCoeffs makeBandCoeffs (int band, const BandSettings& s)
     ChannelEQ::BandCoeffs c;
     c.fc = freqs::hzFor (band, std::clamp (s.position, 0, freqs::numPositions - 1), s.plusStep);
     const bool shelf = s.shelf && (band == 0 || band == 3);
+    if (shelf && band == 3)
+    {
+        c.highShelf = true;
+        c.q = bandwidthToHighShelfQ (s.bandwidthOct);
+        c.shelfDb = applyDeadZone (s.gainDb);
+        return c;                                                  // k = m = 0: not in the parallel network
+    }
     if (shelf)
     {
-        c.mode = band == 0 ? SVF::Mode::LowPass : SVF::Mode::HighPass;
+        c.mode = SVF::Mode::LowPass;
         c.q = bandwidthToShelfQ (s.bandwidthOct);
     }
     else
@@ -384,6 +482,7 @@ inline double magnitudeAt (const Settings& s, double hz)
     for (int i = 0; i < 4; ++i)
     {
         const auto c = makeBandCoeffs (i, s.bands[(size_t) i]);
+        if (c.highShelf) continue;                                 // applied in series, below
         const double w = hz / c.fc;
         const C sj { 0, w };
         const C d { 1 - w * w, w / c.q };
@@ -398,6 +497,10 @@ inline double magnitudeAt (const Settings& s, double hz)
         den.re += c.m * F.re; den.im += c.m * F.im;
     }
     double mag = absC (num) / absC (den);
+    {
+        const auto hs = makeBandCoeffs (3, s.bands[3]);
+        if (hs.highShelf) mag *= HighShelf::magnitude (hz, hs.fc, hs.q, hs.shelfDb);
+    }
 
     const double lc = freqs::lowCutHz[std::clamp (s.lowCutIndex, 0, freqs::numLowCut - 1)];
     if (lc > 0)
