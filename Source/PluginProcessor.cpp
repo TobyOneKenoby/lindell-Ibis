@@ -150,6 +150,8 @@ bool HeronEQAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) 
 void HeronEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const int numCh = juce::jmax (1, getTotalNumOutputChannels());
+    oversamplingOrder = osLog2For (sampleRate);          // OVERSAMPLING (right-click menu)
+    preparedBlockSize = samplesPerBlock;
     oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
         (size_t) numCh, oversamplingOrder, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
     oversampler->initProcessing ((size_t) samplesPerBlock);
@@ -300,11 +302,41 @@ void HeronEQAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         copyXmlToBinary (*xml, destData);
 }
 
+int HeronEQAudioProcessor::getOversampling() const
+{
+    const int f = (int) apvts.state.getProperty ("oversampling", 2);
+    return f == 4 || f == 8 || f == 16 ? f : 2;
+}
+
+int HeronEQAudioProcessor::osLog2For (double sampleRate) const
+{
+    // the factor is chosen for 44.1 / 48 kHz; higher session rates need less, so the
+    // EQ always runs at the same internal rate (and sounds the same)
+    int l = juce::roundToInt (std::log2 ((double) getOversampling()));
+    for (double r = sampleRate; r >= 60000.0 && l > 0; r *= 0.5) --l;
+    return l;
+}
+
+void HeronEQAudioProcessor::setOversampling (int factor)
+{
+    apvts.state.setProperty ("oversampling", factor, nullptr);
+    if (getSampleRate() > 0.0 && osLog2For (getSampleRate()) != oversamplingOrder)
+    {
+        // re-prepare with the audio callback held off; the new latency goes to the host
+        suspendProcessing (true);
+        prepareToPlay (getSampleRate(), preparedBlockSize);
+        suspendProcessing (false);
+    }
+}
+
 void HeronEQAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            setOversampling (getOversampling());      // re-prepares if the session used another factor
+        }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new HeronEQAudioProcessor(); }

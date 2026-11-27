@@ -343,11 +343,18 @@ void HeronEQAudioProcessorEditor::showMenu()
     juce::PopupMenu m;
     m.addItem (1, "Link CH1 and CH2 (stereo)", true, linked);
     m.addItem (2, "Copy CH1 settings to CH2", ! linked);
+    juce::PopupMenu os;                  // OVERSAMPLING: the factor at 44.1 / 48 kHz (2x = default)
+    for (int f : { 2, 4, 8, 16 })
+        os.addItem (2000 + f, juce::String (f) + "x" + (f == 2 ? "  (default)" : ""), true, proc.getOversampling() == f);
+
     m.addSeparator();
     m.addSubMenu ("Size", sizes);
+    m.addSubMenu ("Oversampling", os);
     m.showMenuAsync (juce::PopupMenu::Options(), [this, linkParam, linked] (int r)
     {
-        if (r > 1000)
+        if (r > 2000)
+            proc.setOversampling (r - 2000);
+        else if (r > 1000)
             applyWindowSize (juce::roundToInt (1440.0f * (float) (r - 1000) / 100.0f));
         else if (r == 1)
         {
