@@ -56,6 +56,7 @@ juce_add_binary_data(HeronAssets HEADER_NAME BinaryData.h NAMESPACE BinaryData S
     assets/button_red_strip.png
     assets/button_black_strip.png
     assets/button_white_strip.png
+    assets/button_ring_strip.png
     assets/toggle_strip.png
     assets/lamp_strip.png)
 

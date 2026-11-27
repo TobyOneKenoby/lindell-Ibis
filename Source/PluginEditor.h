@@ -82,17 +82,21 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     HeronEQAudioProcessor& proc;
-    ScaledStrip panel, windowImg, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, toggleStrip, lampStrip;
+    ScaledStrip panel, windowImg, knobLarge, knobSmall, buttonRed, buttonBlack, buttonWhite, buttonRing, toggleStrip, lampStrip;
 
     struct KnobSlot { const layout::Knob* info; std::unique_ptr<FilmstripKnob> knob; std::unique_ptr<SliderAtt> att; };
     struct ButtonSlot { const layout::Button* info; std::unique_ptr<StripButton> button; std::unique_ptr<ButtonAtt> att; };
-    struct ToggleSlot { const layout::Toggle* info; std::unique_ptr<FilmstripToggle> toggle; };
+    struct ToggleSlot { const layout::Toggle* info; std::unique_ptr<StripButton> toggle; };   // push buttons
     std::vector<KnobSlot> knobs;
     std::vector<ButtonSlot> buttons;
     std::vector<ToggleSlot> toggles;
     std::unique_ptr<ButtonAtt> ch1Att, ch2Att, linkAtt;
-    FilmstripToggle* powerSwitch = nullptr;
-    FilmstripToggle* displaySwitch = nullptr;
+    StripButton* powerSwitch = nullptr;
+    StripButton* displaySwitch = nullptr;
+    // green LED ring round every push button, lit while the button is in
+    void drawRing (juce::Graphics&, float cx, float cy, bool lit);
+    juce::uint64 ringState = 0;           // last drawn on/off pattern (repaint when it changes)
+    juce::uint64 currentRingState() const;
 
     // DISPLAY switch: shows / hides the analyser plate (saved with the plug-in state)
     bool displayOn = true;

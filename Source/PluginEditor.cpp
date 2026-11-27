@@ -208,6 +208,8 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     buttonRed   = strip (BinaryData::button_red_strip_png, BinaryData::button_red_strip_pngSize, bf, bf, 2);
     buttonBlack = strip (BinaryData::button_black_strip_png, BinaryData::button_black_strip_pngSize, bf, bf, 2);
     buttonWhite = strip (BinaryData::button_white_strip_png, BinaryData::button_white_strip_pngSize, bf, bf, 2);
+    buttonRing  = strip (BinaryData::button_ring_strip_png, BinaryData::button_ring_strip_pngSize,
+                         layout::ringFrame, layout::ringFrame, 2);
     toggleStrip = strip (BinaryData::toggle_strip_png, BinaryData::toggle_strip_pngSize, tf, tf, 2);
     lampStrip   = strip (BinaryData::lamp_strip_png, BinaryData::lamp_strip_pngSize, lf, lf, 2);
 
@@ -228,7 +230,7 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     }
     for (const auto& t : layout::toggles)
     {
-        auto toggle = std::make_unique<FilmstripToggle> (toggleStrip);
+        auto toggle = std::make_unique<StripButton> (buttonBlack);       // ring lit = the left legend
         addAndMakeVisible (*toggle);
         if (juce::String (t.name) == "ch1") ch1Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (0), *toggle);
         if (juce::String (t.name) == "ch2") ch2Att = std::make_unique<ButtonAtt> (proc.apvts, ids::channelIn (1), *toggle);
@@ -369,10 +371,31 @@ void HeronEQAudioProcessorEditor::paint (juce::Graphics& g)
         paintDisplay (g);
     }
 
+    for (auto& b : buttons) drawRing (g, b.info->x, b.info->y, b.button->getToggleState());
+    for (auto& t : toggles) drawRing (g, t.info->x, t.info->y, t.toggle->getToggleState());
+    ringState = currentRingState();
+
     const float lw = (float) layout::lampFrame / layout::assetScale;
     const auto lr = panelRect (layout::lampX, layout::lampY, lw, lw);
     const int lpx = juce::roundToInt (lr.getWidth() * ps);
     drawExact (g, lampStrip.frame (lampOn ? 1 : 0, lpx, lpx), lr.withSize ((float) lpx / ps, (float) lpx / ps));
+}
+
+void HeronEQAudioProcessorEditor::drawRing (juce::Graphics& g, float cx, float cy, bool lit)
+{
+    const float ps = pixelScale (g);
+    const float rw = (float) layout::ringFrame / layout::assetScale;
+    const auto r = panelRect (cx, cy, rw, rw);
+    const int px = juce::roundToInt (r.getWidth() * ps);
+    drawExact (g, buttonRing.frame (lit ? 1 : 0, px, px), r.withSizeKeepingCentre ((float) px / ps, (float) px / ps));
+}
+
+juce::uint64 HeronEQAudioProcessorEditor::currentRingState() const
+{
+    juce::uint64 bits = 0; int i = 0;
+    for (auto& b : buttons) bits |= (juce::uint64) (b.button->getToggleState() ? 1 : 0) << i++;
+    for (auto& t : toggles) bits |= (juce::uint64) (t.toggle->getToggleState() ? 1 : 0) << i++;
+    return bits;
 }
 
 void HeronEQAudioProcessorEditor::resized()
@@ -387,7 +410,7 @@ void HeronEQAudioProcessorEditor::resized()
     for (auto& b : buttons)
         place (*b.button, b.info->x, b.info->y, layout::buttonFrame);
     for (auto& t : toggles)
-        place (*t.toggle, t.info->x, t.info->y, layout::toggleFrame);
+        place (*t.toggle, t.info->x, t.info->y, layout::buttonFrame);
 }
 
 void HeronEQAudioProcessorEditor::timerCallback()
@@ -398,6 +421,7 @@ void HeronEQAudioProcessorEditor::timerCallback()
 
     const bool power = proc.apvts.getRawParameterValue (ids::bypass)->load() < 0.5f;
     powerSwitch->setToggleState (power, juce::dontSendNotification);
+    if (currentRingState() != ringState) repaint();      // a button changed: its LED ring follows
 
     if (displayOn)
     {

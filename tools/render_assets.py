@@ -57,7 +57,7 @@ PANEL = (2, 2, 1914, 368)
 
 LARGE_R = 37.0                  # gain / low cut
 SMALL_R = 23.5                  # freq / bandwidth / colour source / colour
-BUTTON_R = 15.0
+BUTTON_R = 12.0                 # push buttons (and the former toggles), each with a green LED ring
 TOGGLE_R = 18.5
 LAMP = (948.0, 245.0, 27.0)     # cx, cy, bezel radius
 
@@ -66,6 +66,7 @@ CH_X = {0: dict(lc=212.0, bands=[358.0, 506.0, 652.0, 800.0]),
 Y_GAIN, Y_FREQ, Y_BW = 80.0, 186.0, 313.0
 Y_LC, Y_COLSRC, Y_COLOUR = 80.0, 228.0, 313.0
 Y_STEP, Y_SHELF, Y_STEEP = 254.0, 147.0, 160.0
+# the switches are round black push buttons with the green LED ring (lit = the left legend)
 TOGGLES = {"ch1": (948.0, 48.0), "ch2": (948.0, 112.0), "link": (948.0, 176.0),
            "power": (948.0, 320.0), "display": (1801.0, 262.0)}
 # printed legends of each toggle: title, left position, right position
@@ -230,9 +231,10 @@ def misc_legends(L):
     # centre section
     for name, (x, y) in TOGGLES.items():
         title, left, right = TOGGLE_LEGENDS[name]
-        L.text(title, x, y - (30.0 if name == "power" else 27.0), TITLE * (0.9 if len(title) > 8 else 1.0))
-        L.text(left, x - 32.0 - 1.5 * (len(left) - 2), y, TITLE * 0.92)
-        L.text(right, x + 36.0, y, TITLE * 0.92)
+        L.text(title, x, y - (30.0 if name == "power" else 25.0), TITLE * (0.9 if len(title) > 8 else 1.0))
+        # side legends clear the button's LED ring (they scale with the word length)
+        L.text(left, x - 33.0 - 3.2 * (len(left) - 2), y, TITLE * 0.92)
+        L.text(right, x + 35.0 + 3.2 * (len(right) - 3), y, TITLE * 0.92)
     # dividers between the sections
     for x in DIVIDERS:
         L.line(x, 14.0, x, 356.0, 1.3)
@@ -370,8 +372,7 @@ def render_panel():
 
     large = [(k[3], k[4]) for k in knob_list() if k[5]]
     small = [(k[3], k[4]) for k in knob_list() if not k[5]]
-    buttons = [(b[2], b[3]) for b in button_list()]
-    toggles = list(TOGGLES.values())
+    buttons = [(b[2], b[3]) for b in button_list()] + list(TOGGLES.values())   # all push buttons
     for items, R_ in ((large, LARGE_R), (small, SMALL_R)):
         k = R_ / T.KNOB_R
         shadow += disc_shadow(items, R_ * 1.10, 10.0 * k, 9.0 * k, 0.16)   # short, soft pool
@@ -380,8 +381,6 @@ def render_panel():
         shadow += disc_shadow(items, R_ * 1.03, 0.6, 1.2, 0.55)
     shadow += disc_shadow(buttons, BUTTON_R * 1.05, 4.0, 4.0, 0.40)
     shadow += disc_shadow(buttons, BUTTON_R * 1.02, 0.8, 1.2, 0.45)
-    shadow += disc_shadow(toggles, TOGGLE_R * 0.80, 3.0, 2.5, 0.40)
-    shadow += disc_shadow(toggles, TOGGLE_R * 0.84, 0.5, 1.0, 0.40)
     shadow += disc_shadow([(LAMP[0], LAMP[1])], LAMP[2] * 0.97, 3.0, 3.0, 0.40)
     logos = list(T.place_logos(rgb, shadow))
     rgb *= (1 - 0.66 * np.clip(shadow, 0, 1))[..., None]
@@ -512,7 +511,7 @@ def render_small_knob_strip():
 # PUSH BUTTONS - glossy moulded caps in a hole in the panel, 2 frames:
 # 0 = out, 1 = pushed in (sits deeper: the hole's edge shades its top)
 # --------------------------------------------------------------------------
-BUTTON_FRAME = 126
+BUTTON_FRAME = int(round((BUTTON_R + 6.0) * SCALE)) * 2
 BUTTON_COLOURS = {"red": (196, 26, 20), "black": (24, 23, 23), "white": (226, 226, 220)}
 
 
@@ -555,6 +554,51 @@ def render_button_strips():
         for i in range(2):
             strip.paste(button_frame(colour, i == 1), (0, i * BUTTON_FRAME))
         strip.save(os.path.join(OUT, f"button_{colour}_strip.png"), optimize=True)
+
+
+# --------------------------------------------------------------------------
+# LED RING round every push button (as on Lindell STC-8), 2 frames: 0 = off, 1 = lit
+# --------------------------------------------------------------------------
+RING_R0, RING_R1 = BUTTON_R * 1.08, BUTTON_R * 1.26
+RING_FRAME = int(round((RING_R1 + 9.0) * SCALE)) * 2
+
+
+def ring_frame(lit, ss=4):
+    """the LED ring set into the panel round a push button: a frosted light-pipe,
+    dark smoked green when off, glowing green when the button is in"""
+    N = RING_FRAME * ss
+    c = (N - 1) / 2.0
+    yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
+    px = SCALE * ss                                     # px per photo px
+    r = np.hypot(xx - c, yy - c) / px                   # photo px
+    v = (yy - c) / px / RING_R1                         # -1 top .. +1 bottom
+    mid, half = 0.5 * (RING_R0 + RING_R1), 0.5 * (RING_R1 - RING_R0)
+    t = np.clip(1 - np.abs(r - mid) / half, 0, 1)       # 0 at the edges .. 1 on the centre line
+    ring = smoothstep(0.0, 0.35, t)
+    groove = smoothstep(0.0, 0.25, np.clip(1 - np.abs(r - mid) / (half + 0.8), 0, 1)) * (1 - ring)
+    if not lit:
+        col = np.dstack([28 + 10 * t, 42 + 16 * t, 34 + 11 * t])
+        col *= (1.0 - 0.35 * smoothstep(-0.2, -1.0, v))[..., None]               # shaded at the top lip
+        col += (14 * np.exp(-((r - (RING_R0 + 0.35 * half)) / 0.35) ** 2) * smoothstep(0.0, 0.9, v))[..., None]
+        alpha = np.clip(0.92 * ring + 0.30 * groove, 0, 1)
+        col = col * ring[..., None] + np.array([16, 16, 15], np.float32) * (1 - ring[..., None])
+    else:
+        core = t ** 1.6
+        col = 0.6 * np.dstack([40 + 150 * core, 215 + 40 * core, 105 + 120 * core])   # 40 % below full brightness
+        halo = ndimage.gaussian_filter(ring, 2.6 * px) * 1.9 + ndimage.gaussian_filter(ring, 0.9 * px) * 0.9
+        glow_a = np.clip(halo, 0, 1) * (1 - ring) * 0.75 * 0.6
+        alpha = np.clip(ring + glow_a, 0, 1)
+        glow_col = 0.6 * np.array([60, 255, 120], np.float32)
+        col = (col * ring[..., None] + glow_col * glow_a[..., None]) / np.maximum(alpha, 1e-4)[..., None]
+    img = T.to_img(col, alpha).resize((RING_FRAME, RING_FRAME), Image.LANCZOS)
+    return T.photo_finish(img, blur=0.35, grain=0.0, seed=7 + int(lit))
+
+
+def render_ring_strip():
+    strip = Image.new("RGBA", (RING_FRAME, RING_FRAME * 2))
+    for i in range(2):
+        strip.paste(ring_frame(i == 1), (0, i * RING_FRAME))
+    strip.save(os.path.join(OUT, "button_ring_strip.png"), optimize=True)
 
 
 
@@ -637,6 +681,7 @@ def write_layout_header():
         f"    constexpr float largeKnobR = {LARGE_R}f, smallKnobR = {SMALL_R}f;",
         f"    constexpr int buttonFrame = {BUTTON_FRAME};",
         f"    constexpr float buttonR = {BUTTON_R}f;",
+        f"    constexpr int ringFrame = {RING_FRAME};",
         f"    constexpr int toggleFrame = {T.TOGGLE_FRAME};",
         f"    constexpr float toggleR = {TOGGLE_R}f;",
         f"    constexpr int lampFrame = {T.LAMP_FRAME};",
@@ -689,8 +734,9 @@ if __name__ == "__main__":
     if "smallknob" in what:
         render_small_knob_strip(); print("small knob")
         render_small_knob_strip(); print("small knob")
+    if "all" in what or "small" in what or "buttons" in what:
+        render_button_strips(); render_ring_strip(); print("buttons + LED ring")
     if "all" in what or "small" in what:
-        render_button_strips(); print("buttons")
         T.render_toggle_strip(); print("toggle")
         T.render_lamp_strip(); print("lamp")
     write_layout_header()

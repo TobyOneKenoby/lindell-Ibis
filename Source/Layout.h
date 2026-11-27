@@ -7,8 +7,9 @@ namespace layout
     constexpr float panelW = 1916.0f, panelH = 370.0f, assetScale = 3.0f;
     constexpr int largeKnobFrame = 264, smallKnobFrame = 168, knobFrames = 180;
     constexpr float largeKnobR = 37.0f, smallKnobR = 23.5f;
-    constexpr int buttonFrame = 126;
-    constexpr float buttonR = 15.0f;
+    constexpr int buttonFrame = 108;
+    constexpr float buttonR = 12.0f;
+    constexpr int ringFrame = 144;
     constexpr int toggleFrame = 144;
     constexpr float toggleR = 18.5f;
     constexpr int lampFrame = 300;
