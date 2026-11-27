@@ -182,6 +182,7 @@ struct SVF
 //==============================================================================
 struct LowCut
 {
+    static constexpr double kMain = 0.9, kMainQ = 0.45, kSteep = 0.355, kSteepQ = 0.65;
     SVF s1, s2;
     bool enabled = false, steep = false;
 
@@ -190,15 +191,12 @@ struct LowCut
         enabled = fc > 0.0;
         steep = isSteep;
         if (! enabled) return;
-        if (steep)
-        {
-            s1.setup (fc, 0.54119610, sr, SVF::Mode::HighPass);
-            s2.setup (fc, 1.30656296, sr, SVF::Mode::HighPass);
-        }
-        else
-        {
-            s1.setup (fc, 0.70710678, sr, SVF::Mode::HighPass);
-        }
+        // As the original (manual: LOW CUT EQ CURVES at 40 / 80 / 150 Hz, fitted):
+        // 12 dB/oct is a soft-knee 2nd-order high-pass (Q 0.45, corner at 0.9 x the
+        // setting; Butterworth fits 3-5x worse); STEEP keeps that knee and adds a
+        // second 2nd-order section lower down (Q 0.65 at 0.355 x the setting).
+        s1.setup (fc * kMain, kMainQ, sr, SVF::Mode::HighPass);
+        if (steep) s2.setup (fc * kSteep, kSteepQ, sr, SVF::Mode::HighPass);
     }
 
     void reset() noexcept { s1.reset(); s2.reset(); }
@@ -303,6 +301,7 @@ public:
     void prepare (double sampleRate)
     {
         sr = sampleRate;
+        { const double g = std::tan (kPi * kCouplingHz / sr); cplG = g / (1.0 + g); }
         if (outStage.tab.empty()) outStage.set (16.0, 0.002, 14.0);
         // DC blocker for the even-harmonic path (about 5 Hz).
         dcR = std::exp (-2.0 * kPi * 5.0 / sr);
@@ -313,6 +312,7 @@ public:
     {
         for (auto& b : ff) b.reset();
         for (auto& b : fb) b.reset();
+        for (int i = 0; i < 4; ++i) cplFF[i] = cplFB[i] = 0.0;
         lowCut.reset();
         dcX = dcY = 0; apZ = 0;
     }
@@ -341,6 +341,7 @@ public:
             fb[i].setup (bc[i].fc * tolF, bc[i].q * tolQ, sr, bc[i].mode);
             kBoost[i] = tolGain (bc[i].k);
             mCut[i]   = tolGain (bc[i].m);
+            cplOn[i]  = couplingFor ((int) i, bc[i].mode);
         }
         if (lowCutHz != lastLowCutHz || steep != lastSteep)
         {
@@ -363,7 +364,8 @@ public:
         double yff = x;
         for (int i = 0; i < 4; ++i)
         {
-            const double f = ff[i].process (x);
+            double f = ff[i].process (x);
+            if (cplOn[i]) f = couplingHP (f, cplFF[i]);
             yff += kBoost[i] * f;
             if (i == colourBand && kBoost[i] > 0.0)
                 harm += kBoost[i] * harmonics (f, colourAmt);
@@ -372,9 +374,12 @@ public:
         // --- Feedback (cut) section, solved without delay ---
         double num = yff, den = 1.0;
         double alpha[4], beta[4];
+        double uA[4], uB[4];                            // the band filter's own output (before coupling)
         for (int i = 0; i < 4; ++i)
         {
             fb[i].affine (alpha[i], beta[i]);
+            uA[i] = alpha[i]; uB[i] = beta[i];
+            if (cplOn[i]) { alpha[i] *= 1.0 - cplG; beta[i] = (1.0 - cplG) * (beta[i] - cplFB[i]); }   // hp = (1-G)(u - s)
             num -= mCut[i] * beta[i];
             den += mCut[i] * alpha[i];
         }
@@ -388,6 +393,7 @@ public:
                 harm -= mCut[i] * harmonics (f, colourAmt) / den;
             }
             fb[i].tick (y);
+            if (cplOn[i]) couplingHP (uA[i] * y + uB[i], cplFB[i]);
         }
 
         if (colourSrc == ColourSource::Full)
@@ -418,6 +424,23 @@ private:
     double dcR = 0.999, dcX = 0, dcY = 0;
     double tolF = 1.0, tolQ = 1.0, tolG = 1.0, apHz = 0.0, apA = 0.0, apZ = 0.0;
     ClassAOutput outStage;
+
+public:
+    // Coupling capacitor in the band-filter path of the bells on bands 3 and 4: the
+    // manual's band-3 peaking curves show the widest +12 dB bell 0.8..1 dB down below
+    // ~50 Hz (and the widest cut as much up); a first-order 22 Hz high-pass inside the
+    // filter path gives exactly that. Band 1's curves are flat to 20 Hz: none there.
+    static constexpr double kCouplingHz = 22.0;
+    static bool couplingFor (int band, SVF::Mode mode) noexcept { return band >= 2 && mode == SVF::Mode::BandPass; }
+private:
+    double cplG = 0.0, cplFF[4] {}, cplFB[4] {};
+    bool cplOn[4] {};
+    double couplingHP (double u, double& s) const noexcept
+    {
+        const double v = (u - s) * cplG, lp = v + s;
+        s = lp + v;
+        return u - lp;
+    }
 };
 
 //==============================================================================
@@ -472,6 +495,11 @@ inline double magnitudeAt (const Settings& s, double hz)
             case SVF::Mode::LowPass1:  F = div (C { 1, 0 }, C { 1, w }); break;
             case SVF::Mode::HighPass1: F = div (C { 0, w }, C { 1, w }); break;
         }
+        if (ChannelEQ::couplingFor (i, c.mode))
+        {
+            const double wc = hz / ChannelEQ::kCouplingHz;
+            F = mul (F, div (C { 0, wc }, C { 1, wc }));
+        }
         num.re += c.k * F.re; num.im += c.k * F.im;
         den.re += c.m * F.re; den.im += c.m * F.im;
     }
@@ -480,9 +508,13 @@ inline double magnitudeAt (const Settings& s, double hz)
     const double lc = freqs::lowCutHz[std::clamp (s.lowCutIndex, 0, freqs::numLowCut - 1)];
     if (lc > 0)
     {
-        const double w = hz / lc;
-        const int order = s.lowCutSteep ? 4 : 2;
-        mag *= std::pow (w, order) / std::sqrt (1.0 + std::pow (w, 2 * order)); // Butterworth HP
+        auto hp2 = [hz] (double fc, double q)
+        {
+            const double w = hz / fc;
+            return w * w / std::sqrt ((1.0 - w * w) * (1.0 - w * w) + (w / q) * (w / q));
+        };
+        mag *= hp2 (lc * LowCut::kMain, LowCut::kMainQ);
+        if (s.lowCutSteep) mag *= hp2 (lc * LowCut::kSteep, LowCut::kSteepQ);
     }
     return mag;
 }
