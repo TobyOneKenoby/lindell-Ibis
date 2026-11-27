@@ -259,7 +259,7 @@ HeronEQAudioProcessorEditor::HeronEQAudioProcessorEditor (HeronEQAudioProcessor&
     displaySwitch->onClick = [this] { setDisplayOn (displaySwitch->getToggleState()); };
 
     setResizable (true, false);
-    setSize (1440, 400);
+    setSize ((int) proc.apvts.state.getProperty ("editorWidth", 1440), 400);   // the size is saved with the session
     setDisplayOn (displayOn);
 
     timerCallback();
@@ -272,7 +272,12 @@ void HeronEQAudioProcessorEditor::setDisplayOn (bool on)
 {
     displayOn = on;
     proc.apvts.state.setProperty ("displayOn", on, nullptr);
+    applyWindowSize (getWidth());
+    repaint();
+}
 
+void HeronEQAudioProcessorEditor::applyWindowSize (int width)
+{
     // Order matters: setResizeLimits() immediately re-constrains the current bounds.
     // With the OLD aspect-ratio lock still active that snaps the window toward its
     // limits (the "zooms to maximum" bug). So: unlock, resize at the same width,
@@ -281,12 +286,11 @@ void HeronEQAudioProcessorEditor::setDisplayOn (bool on)
     auto* c = getConstrainer();
     if (c != nullptr)
         c->setFixedAspectRatio (0.0);
-    const int w = juce::jlimit (1000, 2800, getWidth() > 0 ? getWidth() : 1440);
+    const int w = juce::jlimit (1000, 3000, width > 0 ? width : 1440);
     setSize (w, juce::roundToInt ((float) w / aspect));
-    setResizeLimits (1000, juce::roundToInt (1000 / aspect), 2800, juce::roundToInt (2800 / aspect));
+    setResizeLimits (1000, juce::roundToInt (1000 / aspect), 3000, juce::roundToInt (3000 / aspect));
     if ((c = getConstrainer()) != nullptr)
         c->setFixedAspectRatio (aspect);
-    repaint();
 }
 
 juce::Rectangle<float> HeronEQAudioProcessorEditor::panelRect (float cx, float cy, float w, float h) const
@@ -330,12 +334,22 @@ void HeronEQAudioProcessorEditor::showMenu()
     auto* linkParam = proc.apvts.getParameter (ids::link);
     const bool linked = linkParam->getValue() > 0.5f;
 
+    // Size: Pro Tools (AAX) has no resize corner, so the plug-in resizes itself
+    juce::PopupMenu sizes;
+    const int current = juce::roundToInt (100.0f * (float) getWidth() / 1440.0f);
+    for (int pct : { 70, 85, 100, 125, 150, 200 })
+        sizes.addItem (1000 + pct, juce::String (pct) + " %", true, std::abs (current - pct) <= 2);
+
     juce::PopupMenu m;
     m.addItem (1, "Link CH1 and CH2 (stereo)", true, linked);
     m.addItem (2, "Copy CH1 settings to CH2", ! linked);
+    m.addSeparator();
+    m.addSubMenu ("Size", sizes);
     m.showMenuAsync (juce::PopupMenu::Options(), [this, linkParam, linked] (int r)
     {
-        if (r == 1)
+        if (r > 1000)
+            applyWindowSize (juce::roundToInt (1440.0f * (float) (r - 1000) / 100.0f));
+        else if (r == 1)
         {
             linkParam->beginChangeGesture();
             linkParam->setValueNotifyingHost (linked ? 0.0f : 1.0f);
@@ -400,6 +414,7 @@ juce::uint64 HeronEQAudioProcessorEditor::currentRingState() const
 
 void HeronEQAudioProcessorEditor::resized()
 {
+    if (getWidth() > 0) proc.apvts.state.setProperty ("editorWidth", getWidth(), nullptr);
     auto place = [this] (juce::Component& c, float cx, float cy, int frame)
     {
         const float d = (float) frame / layout::assetScale;

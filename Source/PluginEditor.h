@@ -101,6 +101,7 @@ private:
     // DISPLAY switch: shows / hides the analyser plate (saved with the plug-in state)
     bool displayOn = true;
     void setDisplayOn (bool on);
+    void applyWindowSize (int width);    // keeps the panel aspect; Size menu 70 .. 200 %
     float contentH() const { return layout::panelH + (displayOn ? layout::winH : 0.0f); }
 
     bool lampOn = true;
