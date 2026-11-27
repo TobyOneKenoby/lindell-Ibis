@@ -262,13 +262,7 @@ void HeronEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
                 auto& k = bc[b];
                 k.fc = bs.fc;
-                if (bs.shelf && b == 3)
-                {
-                    // HIGH SHELF: a true shelving filter in series (no dip, no overshoot)
-                    k.highShelf = true; k.shelfDb = bs.gain; k.q = bandwidthToHighShelfQ (bs.bw);
-                    continue;
-                }
-                if (bs.shelf) { k.mode = SVF::Mode::LowPass; k.q = bandwidthToShelfQ (bs.bw); }
+                if (bs.shelf) { k.mode = b == 0 ? SVF::Mode::LowPass1 : SVF::Mode::HighPass1; k.q = 0.70710678; }   // 6 dB/oct, BANDWIDTH unused
                 else          { k.mode = SVF::Mode::BandPass; k.q = bandwidthToQ (bs.bw); }
                 const double A = std::pow (10.0, bs.gain / 20.0);
                 k.k = bs.gain > 0 ? A - 1.0 : 0.0;

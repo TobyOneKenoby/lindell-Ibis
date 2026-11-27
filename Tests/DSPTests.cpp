@@ -21,7 +21,8 @@ static void configure (ChannelEQ& eq, const Settings& s)
     eq.update (bc, freqs::lowCutHz[s.lowCutIndex], s.lowCutSteep, s.colourSource, s.colour / 10.0);
 }
 
-// Measured steady-state gain (dB) of a sine through the EQ.
+// Measured steady-state gain (dB) of a sine through the EQ, at -20 dBFS (the class-A
+// output stage clips like the hardware at about +6 dBFS peak, so not at full scale).
 static double measureDb (const Settings& s, double hz)
 {
     ChannelEQ eq; eq.prepare (SR); configure (eq, s);
@@ -30,10 +31,10 @@ static double measureDb (const Settings& s, double hz)
     for (int n = 0; n < settle + len; ++n)
     {
         const double ph = 2.0 * kPi * hz * n / SR;
-        const double y = eq.process (std::sin (ph));
+        const double y = eq.process (0.1 * std::sin (ph));
         if (n >= settle) acc += y * std::polar (1.0, -ph);
     }
-    return 20.0 * std::log10 (2.0 * std::abs (acc) / len);
+    return 20.0 * std::log10 (2.0 * std::abs (acc) / len / 0.1);
 }
 
 static double analyticDb (const Settings& s, double hz) { return 20.0 * std::log10 (magnitudeAt (s, hz)); }
@@ -53,13 +54,14 @@ int main()
     CHECK (applyDeadZone (0.29) == 0.0 && applyDeadZone (-0.29) == 0.0, "dead zone");
     CHECK (std::abs (applyDeadZone (12.0) - 12.0) < 1e-12 && std::abs (applyDeadZone (-12.0) + 12.0) < 1e-12, "dead zone endpoints");
 
-    // 3. Flat settings are bit-transparent (apart from double rounding).
+    // 3. Flat settings are transparent: only the class-A output stage's own residue
+    //    (spec: 0.001 % THD at +20 dBm), here about -108 dB on full-scale noise.
     {
         Settings s; ChannelEQ eq; eq.prepare (SR); configure (eq, s);
         std::mt19937 rng (1); std::uniform_real_distribution<double> d (-1, 1);
         double maxErr = 0;
         for (int n = 0; n < 48000; ++n) { const double x = d (rng); maxErr = std::max (maxErr, std::abs (eq.process (x) - x)); }
-        CHECK (maxErr < 1e-12, "flat EQ not transparent: %g", maxErr);
+        CHECK (maxErr < 1e-4, "flat EQ not transparent: %g", maxErr);
     }
 
     // 4. Peak boost and cut hit +/-12 dB at the centre and mirror each other.
@@ -156,7 +158,7 @@ int main()
         CHECK (h2 > -60, "band colour has no effect");
         b.colourSource = ColourSource::Band1; // band 1 is flat, so nothing happens
         harmonicLevels (b, 440.0, 0.3, h2, h3);
-        CHECK (h2 < -200, "colour on a flat band should do nothing (%.1f)", h2);
+        CHECK (h2 < -120, "colour on a flat band should do nothing (%.1f)", h2);   // (class-A residue ~ -160 dB)
     }
 
     // 9. Stability: random settings, random noise, hot input, no NaN/Inf or blow-up.
